@@ -33,6 +33,7 @@
 !/src/better_lavka_mcp/constants.py
 !/src/better_lavka_mcp/errors.py
 !/src/better_lavka_mcp/payment.py
+!/src/better_lavka_mcp/preferences.py
 !/src/better_lavka_mcp/region.py
 !/src/better_lavka_mcp/server.py
 !/src/better_lavka_mcp/auth/
@@ -54,6 +55,7 @@
 !/src/better_lavka_mcp/orders/tracking.py
 !/tests/
 /tests/*
+!/tests/conftest.py
 !/tests/test_active_orders_mcp.py
 !/tests/test_cancel_order_safe.py
 !/tests/test_cancel_uncertain.py

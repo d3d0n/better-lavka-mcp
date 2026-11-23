@@ -32,6 +32,16 @@ async def test_use_address_matches_name_alias_street_or_index(saved):
 
 
 @pytest.mark.asyncio
+async def test_chosen_address_is_remembered_for_the_next_session(saved, monkeypatch):
+    from better_lavka_mcp import preferences
+    await server.use_address('home')
+    monkeypatch.setattr(server, '_delivery', None)  # a fresh server process
+    assert server._location() == [69.2, 41.3]
+    assert server._current_delivery()['address_id'] == 'a-home'
+    assert 'private' not in preferences.PATH.read_text()  # flat, door code etc. are not stored
+
+
+@pytest.mark.asyncio
 async def test_use_address_returns_candidates_when_unclear(saved):
     result = await server.use_address('avenue')
     assert result['selected'] is False and result['reason'] == 'ambiguous'

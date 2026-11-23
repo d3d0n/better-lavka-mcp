@@ -10,6 +10,7 @@ from better_lavka_mcp.orders import submit as orders
 HOME = [69.2, 41.3]
 # id -> (title as Lavka sends it, current price, unavailable on depot, quantity limit)
 CATALOG = {
+    'oatmilk': ('Мо\xadло\xadко овсяное', 30990, False, '24'),
     'milk': ('Мо\xadло\xadко <notr>Example</notr> 2,5%', 15990, False, '24'),
     'bread': ('Хлеб', 4990, True, '0'),
     'kaymak': ('Кай\xadмак', 21990, False, '3'),
@@ -73,6 +74,21 @@ class FakeLavka:
                 'options': {'ingredients': {'description': '', 'pfcTraits': [
                     {'id': 'calories', 'measures': {'per100g': '77'}}, {'id': 'protein', 'measures': {'per100g': '2'}},
                     {'id': 'fat', 'measures': {'per100g': '0,4'}}, {'id': 'carbohydrate', 'measures': {'per100g': '16,3'}}]}}}})
+        if path.endswith('/v1/layout'):
+            assert body['layoutSlug'] == 'grocery'
+            return httpx.Response(200, json={'sections': [
+                {'categoryGroup': {'categoryGroupInfo': {'id': 'g-dairy', 'title': 'Молочный прилавок'}},
+                 'categories': [{'categoryInfo': {'id': 'c-milk', 'title': 'Молоко, масло и яйца', 'available': True}},
+                                {'categoryInfo': {'id': 'c-closed', 'title': 'Сыры', 'available': False}}]},
+                {'categoryGroup': {'categoryGroupInfo': {'id': 'g-empty', 'title': 'Пусто'}}, 'categories': []}]})
+        if path.endswith('/v2/category'):
+            assert body['categoryId'] == 'c-milk' and body['categorySlugPath'] == {'layoutSlug': 'grocery', 'groupId': 'g-dairy'}
+            return httpx.Response(200, json={
+                'categories': [{'value': {'type': 'category', 'title': 'Молоко, масло и яйца'}, 'items': [
+                    {'value': {'type': 'subcategory', 'title': 'Свежее молоко'}, 'items': [{'id': 'milk'}, {'id': 'oatmilk'}]},
+                    {'value': {'type': 'subcategory', 'title': 'Яй\xadца'}, 'items': [{'id': 'eggs'}]}]}],
+                'products': [{'id': pid, 'title': CATALOG[pid][0], 'currentPrice': CATALOG[pid][1], 'amount': '1 шт', 'available': True}
+                             for pid in ('milk', 'oatmilk', 'eggs')]})
         if path.endswith('/payments/v1/status'):
             return httpx.Response(200, json={'status': 'wait_user_action', 'payload': {'redirectUrl': 'https://trust.example/3ds'}})
         raise AssertionError(path)
@@ -97,6 +113,10 @@ async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
     assert result['limited'] == [{'title': 'Каймак', 'requested': 4, 'max': 3}]
     assert {(a['title'], a['quantity']) for a in result['added']} == {('Молоко Example 2,5%', 2), ('Каймак', 3), ('Яйца', 2)}
     assert {i['title'] for i in result['cart']['items']} == {'Молоко Example 2,5%', 'Каймак', 'Яйца'}
+    # "молоко" matches oat milk first, but the milk you ordered before wins and oat milk is offered as a swap.
+    milk = result['choices'][0]
+    assert (milk['chosen'], milk['ordered_before']) == ('Молоко Example 2,5%', True)
+    assert [a['product_id'] for a in milk['alternatives']] == ['oatmilk']
 
 
 @pytest.mark.asyncio
@@ -147,3 +167,38 @@ async def test_preview_order_defaults_to_session_address_and_only_card(lavka, mo
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
     assert await server.preview_order() == {'index': 1, 'suffix': '4242'}
     assert seen['location'] == HOME
+
+
+@pytest.mark.asyncio
+async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
+    async def addresses(http):
+        return None, [{'addressId': 'a-home', 'address': {'location': HOME}}]
+    class Cards:
+        def __init__(self, http, props, location):
+            pass
+        async def lookup(self):
+            return type('R', (), {'masked_cards': ['**** 1111', '**** 2222']})()
+    async def preview(http, index, suffix):
+        return {'suffix': suffix}
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(orders, 'preview', preview)
+    monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
+    asked = await server.preview_order()
+    assert asked['preview'] is False and asked['cards'] == ['**** 1111', '**** 2222']
+    assert await server.preview_order(card_last4='2222') == {'suffix': '2222'}
+    assert await server.preview_order() == {'suffix': '2222'}
+
+
+@pytest.mark.asyncio
+async def test_catalog_lists_categories_and_browses_shelves(lavka):
+    groups = (await server.list_categories())['groups']
+    assert groups == [{'group_id': 'g-dairy', 'title': 'Молочный прилавок',
+                       'categories': [{'category_id': 'c-milk', 'title': 'Молоко, масло и яйца'}]}]
+    shelf = await server.get_category_products('c-milk')
+    assert shelf['subcategories'] == [{'title': 'Свежее молоко', 'count': 2}, {'title': 'Яйца', 'count': 1}]
+    assert [(p['title'], p['subcategory']) for p in shelf['products']] == [
+        ('Молоко Example 2,5%', 'Свежее молоко'), ('Молоко овсяное', 'Свежее молоко'), ('Яйца', 'Яйца')]
+    eggs = await server.get_category_products('c-milk', subcategory='яйца', limit=5)
+    assert [p['id'] for p in eggs['products']] == ['eggs'] and eggs['total'] == 1
+    with pytest.raises(ValueError, match='list_categories'):
+        await server.get_category_products('c-closed')

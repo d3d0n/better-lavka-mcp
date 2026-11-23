@@ -77,7 +77,7 @@ class Lavka:
         return self.props
 
     async def call(self, path, body):
-        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/geo/v1/suggest", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product"):
+        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/geo/v1/suggest", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product", "/api/v1/providers/v1/layout", "/api/v1/providers/v2/category"):
             raise ValueError("Endpoint is not allowlisted")
         p = self.props or await self.bootstrap()
         locale = p.get("pageEnv", {}).get("locale", "ru-RU")
@@ -177,9 +177,7 @@ class Lavka:
     async def product(self, product_id, location):
         if not isinstance(product_id, str) or not product_id or len(product_id) > 256:
             raise ValueError('A product id is required')
-        p = self.props or await self.bootstrap()
-        info = p.get('pageData', {}).get('serviceInfo', {})
-        body = {'depotType': 'regular', 'currencySign': info.get('currencySign'), 'position': {'location': list(location)},
+        body = {**await self._storefront_body(location),
                 'productId': product_id, 'needCatalogPaths': True, 'isEcomboReward': False,
                 'rewardPriceTemplate': '', 'enableUnavailable': True}
         raw = await self.call('/api/v1/providers/v1/product', body)
@@ -204,12 +202,98 @@ class Lavka:
                 'composition': clean_text(ingredients.get('description')) or None,
                 'details': details}
 
+    async def _storefront_body(self, location):
+        p = self.props or await self.bootstrap()
+        info = p.get('pageData', {}).get('serviceInfo', {})
+        return {'depotType': 'regular', 'currencySign': info.get('currencySign'), 'position': {'location': list(location)}}
+
+    async def categories(self, location):
+        raw = await self.call('/api/v1/providers/v1/layout', {**await self._storefront_body(location), 'layoutSlug': 'grocery'})
+        if not isinstance(raw, dict) or not isinstance(raw.get('sections'), list):
+            raise UpstreamError('Unexpected catalog response')
+        groups = []
+        for section in raw['sections']:
+            group = ((section.get('categoryGroup') or {}).get('categoryGroupInfo') or {}) if isinstance(section, dict) else {}
+            categories = [{'category_id': info['id'], 'title': clean_text(info.get('title'))}
+                          for info in ((c.get('categoryInfo') or {}) for c in section.get('categories') or [] if isinstance(c, dict))
+                          if info.get('id') and info.get('available') is not False]
+            if group.get('id') and categories:
+                groups.append({'group_id': group['id'], 'title': clean_text(group.get('title')), 'categories': categories})
+        return groups
+
+    async def category(self, category_id, location, subcategory=None, limit=30):
+        if not isinstance(category_id, str) or not category_id or len(category_id) > 128:
+            raise ValueError('A category id from list_categories is required')
+        group_id = next((g['group_id'] for g in await self.categories(location)
+                         if any(c['category_id'] == category_id for c in g['categories'])), None)
+        if group_id is None:
+            raise ValueError('Unknown or unavailable category; pick one from list_categories')
+        raw = await self.call('/api/v1/providers/v2/category', {**await self._storefront_body(location), 'modes': ['grocery'],
+                                                                'categoryId': category_id,
+                                                                'categorySlugPath': {'layoutSlug': 'grocery', 'groupId': group_id}})
+        if not isinstance(raw, dict) or not isinstance(raw.get('categories'), list) or not isinstance(raw.get('products'), list):
+            raise UpstreamError('Unexpected category response')
+        cards = {p['id']: p for p in raw['products'] if isinstance(p, dict) and p.get('id')}
+        shelves = []
+        for node in raw['categories']:
+            for shelf in (node.get('items') or []) if isinstance(node, dict) else []:
+                value = shelf.get('value') if isinstance(shelf, dict) else None
+                if isinstance(value, dict) and value.get('type') == 'subcategory':
+                    ids = [g.get('id') for g in shelf.get('items') or [] if isinstance(g, dict) and g.get('id') in cards]
+                    shelves.append((clean_text(value.get('title')), ids))
+        wanted = subcategory.strip().casefold() if isinstance(subcategory, str) and subcategory.strip() else None
+        products = []
+        for title, ids in shelves:
+            if wanted and wanted not in title.casefold():
+                continue
+            for pid in ids:
+                card = cards[pid]
+                products.append({'id': pid, 'title': clean_text(card.get('title')), 'price_uzs': card.get('currentPrice'),
+                                 'pack': card.get('amount'), 'available': card.get('available'), 'subcategory': title})
+        return {'subcategories': [{'title': title, 'count': len(ids)} for title, ids in shelves],
+                'products': products[:limit], 'total': len(products)}
+
+
+def _jar_values(jar):
+    return {(c.domain, c.path, c.name): c.value for c in jar}
+
+
+class _SessionClient(httpx.AsyncClient):
+    """Saves cookies Lavka rotated during the calls back to the session file on close."""
+
+    _loaded_from = None
+
+    async def __aexit__(self, *exc):
+        try:
+            self._save_rotated_cookies()
+        except Exception:
+            pass  # Saving is best effort; the call's own result matters more.
+        return await super().__aexit__(*exc)
+
+    def _save_rotated_cookies(self):
+        if self._loaded_from is None:
+            return
+        raw, values = self._loaded_from
+        current = _jar_values(self.cookies.jar)
+        if current == values:
+            return
+        # Never save a jar that lost the login cookie: keep the old session instead.
+        if not any(name == 'Session_id' for _, _, name in current):
+            return
+        path = Path(STATE)
+        # Another process (a new QR login) replaced the file: keep its session.
+        if path.read_bytes() != raw:
+            return
+        from better_lavka_mcp.auth.qr import save_session
+        save_session(self, path)
+
 
 def create_http():
-    client = httpx.AsyncClient(timeout=25, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    client = _SessionClient(timeout=25, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
     # Preserve original domain scope; never copy .yandex.ru credentials to .uz.
     if Path(STATE).is_file():
-        data = json.loads(Path(STATE).read_text())
+        raw = Path(STATE).read_bytes()
+        data = json.loads(raw)
         for item in data.get("cookies", []):
             try:
                 params = dict(item)
@@ -217,6 +301,7 @@ def create_http():
                 client.cookies.jar.set_cookie(Cookie(**params))
             except (TypeError, KeyError, ValueError):
                 raise UpstreamError("Invalid saved cookie jar") from None
+        client._loaded_from = (raw, _jar_values(client.cookies.jar))
     return client
 
 # One stdio server process serves one client session. Never persist this selection.
@@ -264,16 +349,27 @@ async def select_country(country: str) -> dict:
                         'RU/KZ reads are anonymous; account, cart and checkout tools are UZ-only. Do not use them for this region.'))}
 
 
-# The delivery address chosen with use_address; lives for this server process only.
+# The delivery address chosen with use_address; remembered between sessions.
 _delivery = None
+
+
+def _current_delivery():
+    global _delivery
+    if _delivery is None:
+        from better_lavka_mcp import preferences
+        saved = preferences.load().get('address')
+        if isinstance(saved, dict) and isinstance(saved.get('location'), list) and len(saved['location']) == 2:
+            _delivery = saved
+    return _delivery
 
 
 def _location(longitude=None, latitude=None):
     """Explicit coordinates win; otherwise use the address chosen with use_address."""
     if longitude is None and latitude is None:
-        if _delivery is None:
+        delivery = _current_delivery()
+        if delivery is None:
             raise ValueError('No delivery address yet: call use_address (for example use_address("home")) or pass longitude and latitude')
-        return list(_delivery['location'])
+        return list(delivery['location'])
     if (type(longitude) not in (int, float) or type(latitude) not in (int, float)
             or not (55 <= longitude <= 74 and 37 <= latitude <= 46)):
         raise ValueError('Pass both longitude and latitude inside Uzbekistan')
@@ -289,7 +385,7 @@ def _address_summary(entry, index):
 @mcp.tool()
 @uz_only
 async def use_address(address: str) -> dict:
-    """Choose the delivery address for this session by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. Search, cart and ordering then use it without coordinates."""
+    """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
     global _delivery
     from better_lavka_mcp.orders.submit import addresses
     if not isinstance(address, str) or not address.strip():
@@ -318,6 +414,8 @@ async def use_address(address: str) -> dict:
     if not isinstance(location, list) or len(location) != 2:
         raise ValueError('This saved address has no map point; choose another one')
     _delivery = {'address_id': entries[index].get('addressId'), 'location': location, **_address_summary(entries[index], index)}
+    from better_lavka_mcp import preferences
+    preferences.update(address=_delivery)
     return {'selected': True, **_address_summary(entries[index], index)}
 
 
@@ -462,13 +560,14 @@ class CartRequest(TypedDict, total=False):
 @mcp.tool()
 @uz_only
 async def add_to_cart(items: list[CartRequest], longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1); a query adds the first available search result. Reports what was added, not found, unavailable or capped at the store limit."""
+    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query picks what you ordered before if it is in the results, otherwise the first available one, and lists alternatives so you can swap. Reports what was added, not found, unavailable or capped at the store limit."""
     if not isinstance(items, list) or not items or len(items) > 50:
         raise ValueError('Pass 1–50 items')
     location = _location(longitude, latitude)
-    wanted, titles, not_found = {}, {}, []
+    wanted, titles, not_found, choices = {}, {}, [], []
     async with create_http() as http:
         lavka, client = await _cart_client(http, location)
+        bought = None
         for request in items:
             request = dict(request)
             quantity = request.get('quantity', 1)
@@ -479,17 +578,33 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
                 query = request.get('query')
                 if not isinstance(query, str) or not query.strip():
                     raise ValueError('Each item needs a query or a product_id')
-                found = await lavka.search(query, 5, tuple(location))
-                match = next((p for p in found['products'] if p.get('available') and p.get('id')), None)
-                if match is None:
+                if bought is None:
+                    bought = await _bought_before(lavka)
+                found = await lavka.search(query, 8, tuple(location))
+                candidates = [p for p in found['products'] if p.get('available') and p.get('id')]
+                if not candidates:
                     not_found.append(query)
                     continue
+                match = next((p for p in candidates if p['id'] in bought), candidates[0])
+                choices.append({'query': query, 'chosen': match['title'], 'price_uzs': match['price'],
+                                'ordered_before': match['id'] in bought,
+                                'alternatives': [{'product_id': p['id'], 'title': p['title'], 'price_uzs': p['price']}
+                                                 for p in candidates if p is not match][:3]})
                 product_id, titles[match['id']] = match['id'], match['title']
             wanted[product_id] = wanted.get(product_id, 0) + quantity
         if not wanted:
-            return {'added': [], 'not_found': not_found, 'unavailable': [], 'limited': [], 'cart': _cart_view(await client.retrieve())}
+            return {'added': [], 'not_found': not_found, 'unavailable': [], 'limited': [], 'choices': choices, 'cart': _cart_view(await client.retrieve())}
         result = await _add_products(client, wanted, titles)
-    return {**result, 'not_found': not_found}
+    return {**result, 'not_found': not_found, 'choices': choices}
+
+
+async def _bought_before(lavka):
+    """Product ids from recent orders; an unreadable history just means no preference."""
+    try:
+        history = await lavka.order_history(21)
+    except (UpstreamError, ValueError):
+        return set()
+    return {line['product_id'] for order in history['orders'] for line in order['items']}
 
 
 @mcp.tool()
@@ -522,6 +637,27 @@ async def get_product(product_id: str, longitude: float | None = None, latitude:
     location = _location(longitude, latitude)
     async with create_http() as http:
         return await Lavka(http).product(product_id, location)
+
+
+@mcp.tool()
+@uz_only
+async def list_categories(longitude: float | None = None, latitude: float | None = None) -> dict:
+    """The store's catalog: groups ("Молочный прилавок", "Готовая еда"…) with their categories and category_id, for the delivery address."""
+    location = _location(longitude, latitude)
+    async with create_http() as http:
+        return {'groups': await Lavka(http).categories(location)}
+
+
+@mcp.tool()
+@uz_only
+async def get_category_products(category_id: str, subcategory: str | None = None, limit: int = 30,
+                                longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Browse one category from list_categories: its shelves (subcategories) with counts and products with prices. Pass subcategory (e.g. "Яйца") to see one shelf. limit is 1–100."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError('limit must be between 1 and 100')
+    location = _location(longitude, latitude)
+    async with create_http() as http:
+        return await Lavka(http).category(category_id, location, subcategory, limit)
 
 
 @mcp.tool()
@@ -602,27 +738,37 @@ async def list_saved_addresses() -> dict:
 @mcp.tool()
 @uz_only
 async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
-    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to your only saved card. Charges nothing."""
+    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing."""
+    from better_lavka_mcp import preferences
     from better_lavka_mcp.orders.submit import addresses, preview
     from better_lavka_mcp.payment import PaymentClient
+    chosen_card = card_last4
     async with create_http() as http:
         if saved_address_index is None or card_last4 is None:
             _, entries = await addresses(http)
             if saved_address_index is None:
-                if _delivery is None:
+                delivery = _current_delivery()
+                if delivery is None:
                     raise ValueError('Choose the delivery address first with use_address, or pass saved_address_index')
-                ids = [i for i, entry in enumerate(entries) if entry.get('addressId') == _delivery['address_id']]
+                ids = [i for i, entry in enumerate(entries) if entry.get('addressId') == delivery['address_id']]
                 if len(ids) != 1:
                     raise ValueError('The address chosen with use_address is gone; call use_address again')
                 saved_address_index = ids[0]
             if card_last4 is None:
                 location = entries[saved_address_index]['address'].get('location') if 0 <= saved_address_index < len(entries) else None
                 props = await Lavka(http).bootstrap()
-                cards = (await PaymentClient(http, props, location).lookup()).masked_cards
-                if len(cards) != 1:
-                    return {'preview': False, 'cards': cards, 'note': 'Ask which card to use and pass card_last4.'}
-                card_last4 = cards[0][-4:]
-        return await preview(http, saved_address_index, card_last4)
+                cards = [mask[-4:] for mask in (await PaymentClient(http, props, location).lookup()).masked_cards]
+                remembered = preferences.load().get('card_last4')
+                if remembered in cards:
+                    card_last4 = remembered
+                elif len(cards) == 1:
+                    card_last4 = cards[0]
+                else:
+                    return {'preview': False, 'cards': ['**** ' + c for c in cards], 'note': 'Ask which card to use and pass card_last4; it is remembered for next time.'}
+        result = await preview(http, saved_address_index, card_last4)
+    if chosen_card is not None:
+        preferences.update(card_last4=chosen_card)
+    return result
 
 
 @mcp.tool()
