@@ -835,11 +835,3 @@ async def cancel_order(order_id: str, explicit_confirmation: bool) -> dict:
 
 from better_lavka_mcp.auth.tools import register_qr_tools
 register_qr_tools(mcp, STATE, uz_only)
-
-
-def main():
-    mcp.run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()

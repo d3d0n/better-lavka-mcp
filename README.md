@@ -89,6 +89,8 @@ mise run test      # offline suite, no network, no money
 ```
 Then point the client at `/absolute/path/to/better-lavka-mcp/.venv/bin/better-lavka-mcp`.
 
+**Uninstall:** `uvx better-lavka-mcp uninstall` deletes the sign-in, remembered address and card, and everything else the server stored, then prints how to remove the client entry and the package.
+
 Settings:
 
 - `YANDEX_LAVKA_REGION` — startup country: `UZ` (default), `RU` or `KZ`. `select_country` changes it for this process only.

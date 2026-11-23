@@ -36,6 +36,7 @@
 !/src/better_lavka_mcp/aliases.py
 !/src/better_lavka_mcp/preferences.py
 !/src/better_lavka_mcp/region.py
+!/src/better_lavka_mcp/uninstall.py
 !/src/better_lavka_mcp/render.py
 !/src/better_lavka_mcp/server.py
 !/src/better_lavka_mcp/auth/
@@ -97,6 +98,7 @@
 !/tests/test_submit_diagnostics.py
 !/tests/test_submit_payload.py
 !/tests/test_tracking_projection.py
+!/tests/test_uninstall.py
 
 # Block sensitive files even inside allowed directories.
 **/.env

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "better-lavka-mcp"
-version = "0.5.1"
+version = "0.5.2"
 description = "MCP server for ordering groceries from Yandex Lavka Uzbekistan with an AI assistant"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -33,7 +33,7 @@ Source = "https://github.com/d3d0n/better-lavka-mcp"
 Issues = "https://github.com/d3d0n/better-lavka-mcp/issues"
 
 [project.scripts]
-better-lavka-mcp = "better_lavka_mcp.server:main"
+better-lavka-mcp = "better_lavka_mcp:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
