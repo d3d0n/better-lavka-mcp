@@ -560,11 +560,11 @@ class CartRequest(TypedDict, total=False):
 @mcp.tool()
 @uz_only
 async def add_to_cart(items: list[CartRequest], longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query picks what you ordered before if it is in the results, otherwise the first available one, and lists alternatives so you can swap. Reports what was added, not found, unavailable or capped at the store limit."""
+    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query adds what you ordered before, or the only match; otherwise nothing is added for it and needs_choice lists up to 5 options to pick from — ask the user, then call again with the product_id. Reports what was added, needs a choice, not found, unavailable or capped at the store limit."""
     if not isinstance(items, list) or not items or len(items) > 50:
         raise ValueError('Pass 1–50 items')
     location = _location(longitude, latitude)
-    wanted, titles, not_found, choices = {}, {}, [], []
+    wanted, titles, not_found, needs_choice = {}, {}, [], []
     async with create_http() as http:
         lavka, client = await _cart_client(http, location)
         bought = None
@@ -585,17 +585,18 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
                 if not candidates:
                     not_found.append(query)
                     continue
-                match = next((p for p in candidates if p['id'] in bought), candidates[0])
-                choices.append({'query': query, 'chosen': match['title'], 'price_uzs': match['price'],
-                                'ordered_before': match['id'] in bought,
-                                'alternatives': [{'product_id': p['id'], 'title': p['title'], 'price_uzs': p['price']}
-                                                 for p in candidates if p is not match][:3]})
+                match = next((p for p in candidates if p['id'] in bought), candidates[0] if len(candidates) == 1 else None)
+                if match is None:
+                    needs_choice.append({'query': query, 'quantity': quantity,
+                                         'options': [{'product_id': p['id'], 'title': p['title'], 'price_uzs': p['price'], 'pack': p.get('quantity')}
+                                                     for p in candidates[:5]]})
+                    continue
                 product_id, titles[match['id']] = match['id'], match['title']
             wanted[product_id] = wanted.get(product_id, 0) + quantity
         if not wanted:
-            return {'added': [], 'not_found': not_found, 'unavailable': [], 'limited': [], 'choices': choices, 'cart': _cart_view(await client.retrieve())}
+            return {'added': [], 'needs_choice': needs_choice, 'not_found': not_found, 'unavailable': [], 'limited': [], 'cart': _cart_view(await client.retrieve())}
         result = await _add_products(client, wanted, titles)
-    return {**result, 'not_found': not_found, 'choices': choices}
+    return {**result, 'needs_choice': needs_choice, 'not_found': not_found}
 
 
 async def _bought_before(lavka):

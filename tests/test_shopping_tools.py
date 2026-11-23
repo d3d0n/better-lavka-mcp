@@ -15,6 +15,9 @@ CATALOG = {
     'bread': ('Хлеб', 4990, True, '0'),
     'kaymak': ('Кай\xadмак', 21990, False, '3'),
     'eggs': ('Яйца', 25990, False, '10'),
+    'yogurt-straw': ('Йогурт клубничный', 9990, False, '20'),
+    'yogurt-peach': ('Йогурт персиковый', 8990, False, '20'),
+    'smetana': ('Сметана', 12990, False, '20'),
 }
 ORDER = {'orderId': 'order-1', 'createdAt': '2026-01-01T09:00:00+00:00', 'status': 'closed',
          'calculation': {'finalCost': '99000', 'items': [
@@ -106,17 +109,19 @@ def lavka(monkeypatch):
 async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
     lavka.cart = {'eggs': 1}
     result = await server.add_to_cart([{'query': 'молоко', 'quantity': 2}, {'query': 'хлеб'}, {'query': 'каймак', 'quantity': 4},
-                                       {'query': 'ананас'}, {'product_id': 'eggs'}])
-    assert lavka.updates[0] == {'milk': 2, 'kaymak': 4, 'eggs': 2}
+                                       {'query': 'ананас'}, {'product_id': 'eggs'}, {'query': 'йогурт', 'quantity': 3},
+                                       {'query': 'сметана'}])
+    # Never bought: "йогурт" has two matches, so nothing is added for it; "сметана" has one, so it is.
+    assert lavka.updates[0] == {'milk': 2, 'kaymak': 4, 'eggs': 2, 'smetana': 1}
     assert lavka.updates[1] == {'kaymak': 3}
     assert result['not_found'] == ['хлеб', 'ананас']
     assert result['limited'] == [{'title': 'Каймак', 'requested': 4, 'max': 3}]
-    assert {(a['title'], a['quantity']) for a in result['added']} == {('Молоко Example 2,5%', 2), ('Каймак', 3), ('Яйца', 2)}
-    assert {i['title'] for i in result['cart']['items']} == {'Молоко Example 2,5%', 'Каймак', 'Яйца'}
-    # "молоко" matches oat milk first, but the milk you ordered before wins and oat milk is offered as a swap.
-    milk = result['choices'][0]
-    assert (milk['chosen'], milk['ordered_before']) == ('Молоко Example 2,5%', True)
-    assert [a['product_id'] for a in milk['alternatives']] == ['oatmilk']
+    assert {(a['title'], a['quantity']) for a in result['added']} == {('Молоко Example 2,5%', 2), ('Каймак', 3), ('Яйца', 2), ('Сметана', 1)}
+    assert not any('Йогурт' in i['title'] for i in result['cart']['items'])
+    # "молоко" matches oat milk first, but the milk you ordered before wins.
+    assert result['needs_choice'] == [{'query': 'йогурт', 'quantity': 3, 'options': [
+        {'product_id': 'yogurt-straw', 'title': 'Йогурт клубничный', 'price_uzs': 9990, 'pack': None},
+        {'product_id': 'yogurt-peach', 'title': 'Йогурт персиковый', 'price_uzs': 8990, 'pack': None}]}]
 
 
 @pytest.mark.asyncio

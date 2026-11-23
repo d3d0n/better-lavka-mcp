@@ -26,25 +26,25 @@ You sign in once by scanning a QR code in the Yandex app. Everything runs on you
 
 ## Stuff you do with it
 
-- **Say where once.** «Доставляй домой» — the assistant picks your saved address and remembers it next time.
-- **Ask what's on the shelf.** «Chilonzorda sut bormi?» — milk and its price at your Lavka.
-- **Shopping list in one message.** «Молоко, хлеб, шесть яиц» — all of it lands in the cart in one go. It picks what you bought before and tells you what's missing.
-- **Browse the shelves.** «Что есть в молочке?» — categories and shelves with prices, like in the app.
-- **Same as last time.** «Повтори прошлый заказ» — everything from your last order goes back into the cart at today's prices, minus what's sold out.
-- **Read the label.** «Сколько калорий в этом хлебе?» — calories, protein, fat, carbs, ingredients and shelf life from the product card.
+- **Say where once.** "Deliver home" — the assistant picks your saved address and remembers it next time.
+- **Ask what's on the shelf.** "Is there milk at Chilonzor?" — milk and its price at your Lavka.
+- **Shopping list in one message.** "Milk, bread, six eggs" — all of it lands in the cart in one go. It takes what you bought before; for anything new it shows the options and asks which one.
+- **Browse the shelves.** "What's in the dairy section?" — categories and shelves with prices, like in the app.
+- **Same as last time.** "Repeat my last order" — everything from your last order goes back into the cart at today's prices, minus what's sold out.
+- **Read the label.** "How many calories are in this bread?" — calories, protein, fat, carbs, ingredients and shelf life from the product card.
 - **Say yes.** The assistant shows address, items, total and card; you agree, the order goes out, and if the bank wants 3-D Secure you get the link.
-- **Check on orders.** «Что я заказывал?», «отмени заказ».
+- **Check on orders.** "What did I order last time?", "Cancel my order."
 - **Peek at Russia and Kazakhstan.** Browse the RU and KZ storefronts and search their products.
 
 ---
 
 ## Three little stories
 
-**Sunday restock.** You type *«повтори прошлый заказ домой»*. Potatoes, chicken, cottage cheese and the rest go back in the cart; the flatbread is sold out today, and the assistant says so. It shows the total, you say «да», and breakfast is on its way.
+**Sunday restock.** You type *"repeat my last order, deliver home"*. Potatoes, chicken, cottage cheese and the rest go back in the cart; the flatbread is sold out today, and the assistant says so. It shows the total, you say "yes", and breakfast is on its way.
 
-**Recipe to cart.** You paste a plov recipe and say *«собери всё для этого на четверых»*. The assistant turns it into a list, and rice, carrots, lamb, oil and cumin go into the cart in one request. Anything out of stock comes back to you with a suggestion to swap.
+**Recipe to cart.** You paste a plov recipe and say *"get everything for four people"*. The assistant turns it into a list and puts rice, carrots, lamb, oil and cumin in the cart in one request. Where there are several kinds and you haven't bought one before, it asks which; anything out of stock comes back with a suggestion to swap.
 
-**Label check.** *«Bu nonda nechta kaloriya bor?»* The assistant opens the product card and answers in Uzbek: 240 kcal per 100 g, 7.7 g protein, three days of shelf life.
+**Label check.** *"How many calories are in this bread?"* The assistant opens the product card: 240 kcal per 100 g, 7.7 g protein, three days of shelf life.
 
 ---
 
@@ -102,7 +102,7 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 
 | Tool | What it does |
 |---|---|
-| `use_address` | Pick the delivery address by name ("Дом", "Work"); remembered next time |
+| `use_address` | Pick the delivery address by its saved name ("Home", "Work"); remembered next time |
 | `search_products` | Find products and prices |
 | `list_categories` | The catalog: groups and categories |
 | `get_category_products` | Shelves and products in one category |
