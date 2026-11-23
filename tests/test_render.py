@@ -35,8 +35,7 @@ async def test_add_to_cart_text_names_choices_ids_and_next_step(lavka):
     assert 'Total **21 990 сум** incl. delivery 10 сум · arrives in 15 мин' in text
     assert 'Ready to order: preview_order' in text
     assert '{' not in text  # no JSON
-    # The short id goes back in as a product_id and still means the same yogurt, also in a new session.
-    aliases.reset()
+    # The short id goes back in as a product_id and still means the same yogurt.
     await text_of('add_to_cart', {'items': [{'product_id': straw, 'quantity': 2}]})
     assert lavka.cart['yogurt-straw'] == 2
 
@@ -51,6 +50,25 @@ def test_short_ids_are_three_known_words_stable_and_collision_free(monkeypatch):
     assert aliases.resolve('amber  fox wave') == 'one' and aliases.resolve('two') == 'two'
     with pytest.raises(ValueError, match='Unknown id'):
         aliases.resolve('owl owl owl')
+
+
+def test_short_ids_are_shared_with_other_processes_and_never_reused(monkeypatch, tmp_path):
+    import sqlite3
+    import subprocess
+    import sys
+    monkeypatch.setattr(aliases, '_candidate', lambda real_id, attempt: ['amber fox wave', 'amber fox wind', 'amber fox wing'][attempt])
+    assert aliases.short('mine') == 'amber fox wave'
+    # Another server process allocates with the same file and the same (colliding) hash.
+    script = ('import sys; from better_lavka_mcp import aliases; aliases.PATH = sys.argv[1]; '
+              "aliases._candidate = lambda r, a: ['amber fox wave', 'amber fox wind', 'amber fox wing'][a]; "
+              "print(aliases.short('theirs'))")
+    other = subprocess.run([sys.executable, '-c', script, str(aliases.PATH)], capture_output=True, text=True, check=True).stdout.strip()
+    assert other == 'amber fox wind'
+    # This process sees the other one's id immediately and never hands the same words to a third product.
+    assert aliases.resolve('amber fox wind') == 'theirs'
+    assert aliases.short('third') == 'amber fox wing'
+    with sqlite3.connect(aliases.PATH) as db:
+        assert db.execute('SELECT COUNT(*), COUNT(DISTINCT alias), COUNT(DISTINCT real_id) FROM aliases').fetchone() == (3, 3, 3)
 
 
 @pytest.mark.asyncio
@@ -80,6 +98,20 @@ def test_preview_hands_over_token_and_exact_total():
 ])
 def test_submit_outcomes_say_what_to_do(result, expected):
     assert expected in render.render('submit_order', result)
+
+
+def test_order_total_does_not_subtract_the_discount_twice():
+    # Live shape: products price is already discounted (189 110 + 10 + 3 990 = 193 110).
+    text = render.render('get_order', {'order_id': 'o1', 'created_at': '2026-11-13T16:15:23', 'status_text': 'Доставлен', 'address': 'x',
+                                       'items': [], 'products_uzs': '189110', 'delivery_uzs': '10', 'service_fee_uzs': '3990',
+                                       'discount_uzs': '21600', 'total_uzs': '193110'})
+    assert 'Products 189 110 сум + delivery 10 сум + service fee 3 990 сум = **193 110 сум** (discount of 21 600 сум already included)' in text
+
+
+def test_tracking_feed_counts_entries_not_orders():
+    assert 'feed is empty' in render.render('list_active_orders', {'active_order_count': 0, 'history_complete': False})
+    text = render.render('list_active_orders', {'active_order_count': None, 'feed_entry_count': 2})
+    assert '2 entries' in text and 'order' not in text.split(';')[0]
 
 
 @pytest.mark.asyncio

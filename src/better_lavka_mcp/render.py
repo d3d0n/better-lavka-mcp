@@ -189,7 +189,7 @@ def _order(r):
              f"Delivered to: {r.get('address')}"]
     lines += [f"- {i['name']} ×{i['quantity']} — {money(i.get('price_uzs'))} · {ref(i['product_id'])}" for i in r['items']]
     lines.append(f"Products {money(r.get('products_uzs'))} + delivery {money(r.get('delivery_uzs'))} + service fee {money(r.get('service_fee_uzs'))}"
-                 f" − discount {money(r.get('discount_uzs'))} = **{money(r.get('total_uzs'))}**")
+                 f" = **{money(r.get('total_uzs'))}** (discount of {money(r.get('discount_uzs'))} already included).")
     lines.append('Next: repeat_order with this id to order it again.')
     return '\n'.join(lines)
 
@@ -244,8 +244,9 @@ def _submit(r):
 
 def _active(r):
     if r.get('active_order_count') == 0:
-        return 'No orders on the way right now.'
-    return f"{r.get('feed_entry_count')} order(s) are being tracked. Details aren't decoded yet; the Lavka app shows the courier."
+        return 'The tracking feed is empty. A just-placed order can take a moment to show up; list_order_history has the full list.'
+    return (f"The tracking feed has {r.get('feed_entry_count')} entr{'y' if r.get('feed_entry_count') == 1 else 'ies'}; "
+            'their status is not decoded yet, so check the Lavka app for the courier.')
 
 
 def _status(r):
@@ -312,6 +313,4 @@ def render(tool, result):
     """Text for the model, or JSON when BETTER_LAVKA_MCP_OUTPUT=json."""
     if json_output():
         return json.dumps(result, ensure_ascii=False, indent=2)
-    text = RENDERERS[tool](result)
-    aliases.save()
-    return text
+    return RENDERERS[tool](result)

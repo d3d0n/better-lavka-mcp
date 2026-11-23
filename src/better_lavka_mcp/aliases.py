@@ -2,17 +2,15 @@
 
 `7acc5006e3dd4636bb613646099df8a5000400020001` costs ~23 tokens; `amber fox wave` costs ~5.
 The words come from a hash of the real id, so the same product always gets the same short id.
-Every short id the server has shown is kept in a small owner-only file, so it can be turned back
-into the real id in later calls and sessions; a hash collision just tries the next variant.
+Issued short ids live in an owner-only SQLite file and are never reused for anything else:
+both columns are UNIQUE, allocation runs in one transaction, so several server processes agree,
+and a hash collision takes the next free variant.
 """
 import hashlib
-import json
-import os
-import tempfile
+import sqlite3
 from pathlib import Path
 
-PATH = Path.home() / '.local/share/yandex-lavka-mcp/aliases.json'
-LIMIT = 20000  # oldest short ids are forgotten beyond this
+PATH = Path.home() / '.local/share/yandex-lavka-mcp/aliases.sqlite'
 
 # Each word is a single token on its own and after a space in common LLM tokenizers.
 WORDS = (
@@ -29,21 +27,14 @@ WORDS = (
 ).split()
 _WORD_SET = frozenset(WORDS)
 
-_table = None  # short id -> real id
-_reverse = None  # real id -> short id
-_dirty = False
 
-
-def _load():
-    global _table, _reverse
-    if _table is None:
-        try:
-            data = json.loads(Path(PATH).read_text(encoding='utf-8'))
-            _table = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(data, dict) else {}
-        except (OSError, ValueError):
-            _table = {}
-        _reverse = {v: k for k, v in _table.items()}
-    return _table
+def _connect():
+    target = Path(PATH)
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    db = sqlite3.connect(target, timeout=10, isolation_level=None)
+    target.chmod(0o600)
+    db.execute('CREATE TABLE IF NOT EXISTS aliases (alias TEXT PRIMARY KEY, real_id TEXT NOT NULL UNIQUE)')
+    return db
 
 
 def _candidate(real_id, attempt):
@@ -52,20 +43,31 @@ def _candidate(real_id, attempt):
 
 
 def short(real_id):
-    """Short id for a real id (remembered until save())."""
-    global _dirty
+    """Short id for a real id; issued once and kept forever."""
     if not isinstance(real_id, str) or not real_id:
         return real_id
-    table = _load()
-    if real_id in _reverse:
-        return _reverse[real_id]
-    attempt = 0
-    while (alias := _candidate(real_id, attempt)) in table:
-        attempt += 1
-    table[alias] = real_id
-    _reverse[real_id] = alias
-    _dirty = True
-    return alias
+    db = _connect()
+    try:
+        row = db.execute('SELECT alias FROM aliases WHERE real_id = ?', (real_id,)).fetchone()
+        if row:
+            return row[0]
+        db.execute('BEGIN IMMEDIATE')  # one allocator at a time across processes
+        try:
+            row = db.execute('SELECT alias FROM aliases WHERE real_id = ?', (real_id,)).fetchone()
+            if row:
+                db.execute('COMMIT')
+                return row[0]
+            attempt = 0
+            while db.execute('SELECT 1 FROM aliases WHERE alias = ?', (alias := _candidate(real_id, attempt),)).fetchone():
+                attempt += 1
+            db.execute('INSERT INTO aliases (alias, real_id) VALUES (?, ?)', (alias, real_id))
+            db.execute('COMMIT')
+            return alias
+        except BaseException:
+            db.execute('ROLLBACK')
+            raise
+    finally:
+        db.close()
 
 
 def is_alias(value):
@@ -77,35 +79,11 @@ def resolve(value):
     """Real id for a short id; real ids pass through unchanged."""
     if not is_alias(value):
         return value
-    real = _load().get(' '.join(value.split()))
-    if real is None:
-        raise ValueError(f'Unknown id "{value}". Search or list again to get a current id.')
-    return real
-
-
-def save():
-    """Write new short ids to disk (owner-only), keeping the newest LIMIT."""
-    global _dirty, _table, _reverse
-    if not _dirty:
-        return
-    table = _load()
-    if len(table) > LIMIT:
-        _table = dict(list(table.items())[-LIMIT:])
-        _reverse = {v: k for k, v in _table.items()}
-    target = Path(PATH)
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix='.lavka-aliases-', dir=target.parent)
+    db = _connect()
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            json.dump(_table, stream, ensure_ascii=False)
-        os.replace(temporary, target)
+        row = db.execute('SELECT real_id FROM aliases WHERE alias = ?', (' '.join(value.split()),)).fetchone()
     finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    _dirty = False
-
-
-def reset():
-    """Forget the in-memory table (tests, or after PATH changes)."""
-    global _table, _reverse, _dirty
-    _table, _reverse, _dirty = None, None, False
+        db.close()
+    if row is None:
+        raise ValueError(f'Unknown id "{value}". Search or list again to get a current id.')
+    return row[0]
