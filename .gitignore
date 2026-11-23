@@ -35,6 +35,7 @@
 !/src/better_lavka_mcp/payment.py
 !/src/better_lavka_mcp/preferences.py
 !/src/better_lavka_mcp/region.py
+!/src/better_lavka_mcp/render.py
 !/src/better_lavka_mcp/server.py
 !/src/better_lavka_mcp/auth/
 /src/better_lavka_mcp/auth/*
@@ -86,6 +87,7 @@
 !/tests/test_rejection_shapes.py
 !/tests/test_saved_addresses.py
 !/tests/test_region_selection.py
+!/tests/test_render.py
 !/tests/test_region_state.py
 !/tests/test_regional_routing.py
 !/tests/test_regional_storefront.py

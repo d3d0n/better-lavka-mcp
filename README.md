@@ -93,6 +93,7 @@ Settings:
 
 - `YANDEX_LAVKA_REGION` — startup country: `UZ` (default), `RU` or `KZ`. `select_country` changes it for this process only.
 - `YANDEX_SESSION_FILE` — where the session cookies live.
+- `BETTER_LAVKA_MCP_OUTPUT=json` — tools return raw JSON instead of the default short text. The text says what happened, lists the data with ids, and tells the assistant what to do next; JSON is handy for scripts and debugging.
 
 ---
 

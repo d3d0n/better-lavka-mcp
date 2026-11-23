@@ -1,5 +1,6 @@
 """Unofficial Yandex Lavka Uzbekistan MCP server."""
 import html
+import inspect
 import json
 import logging
 import os
@@ -77,7 +78,7 @@ class Lavka:
         return self.props
 
     async def call(self, path, body):
-        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/geo/v1/suggest", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product", "/api/v1/providers/v1/layout", "/api/v1/providers/v2/category"):
+        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/address/v1/suggest-search", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product", "/api/v1/providers/v1/layout", "/api/v1/providers/v2/category"):
             raise ValueError("Endpoint is not allowlisted")
         p = self.props or await self.bootstrap()
         locale = p.get("pageEnv", {}).get("locale", "ru-RU")
@@ -131,9 +132,18 @@ class Lavka:
         return {"products": products, "location_supplied": location is not None, "currency_source": region_source, "note": "Availability and price are location dependent; no delivery coverage is implied."}
 
     async def suggest(self, query):
-        if not query.strip():
+        if not isinstance(query, str) or not query.strip():
             raise ValueError("Address query required")
-        return await self.call("/api/v1/providers/geo/v1/suggest", {"query": query, "action": "user_input", "lang": "ru"})
+        raw = await self.call("/api/v1/providers/address/v1/suggest-search", {"input": query})
+        if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+            raise UpstreamError("Unexpected address response")
+        found = []
+        for item in raw["items"]:
+            position = item.get("position") if isinstance(item, dict) else None
+            if isinstance(position, list) and len(position) == 2:
+                found.append({"title": clean_text(item.get("title")).strip(), "area": clean_text(item.get("label")).strip(),
+                              "longitude": position[0], "latitude": position[1]})
+        return found
 
     async def saved_address_count(self):
         p = self.props or await self.bootstrap()
@@ -329,9 +339,30 @@ def uz_only(fn):
             _active_uz_operations -= 1
     return guarded
 
-mcp = FastMCP("Yandex Lavka Uzbekistan")
+mcp = FastMCP("Better Lavka", instructions=(
+    "Grocery shopping in Yandex Lavka Uzbekistan. Usual flow: get_storefront_status shows whether the user is signed in "
+    "(if not, start_login and poll get_login_status); use_address once (it is remembered); then search_products, "
+    "add_to_cart (a whole list at once), repeat_order or the catalog; preview_order; and submit_order only after the user "
+    "agreed to the exact total. Every result says what to do next."))
 
-@mcp.tool()
+
+def tool():
+    """Register a tool whose dictionary result is rendered as text for the model (JSON with BETTER_LAVKA_MCP_OUTPUT=json).
+
+    The undecorated function stays importable and returns the dictionary, which keeps the logic easy to test."""
+    from better_lavka_mcp.render import json_output, render
+
+    def register(fn):
+        @wraps(fn)
+        async def as_text(*args, **kwargs):
+            result = await fn(*args, **kwargs)
+            return result if json_output() else render(fn.__name__, result)
+        as_text.__signature__ = inspect.signature(fn).replace(return_annotation=str)
+        mcp.tool(structured_output=False)(as_text)
+        return fn
+    return register
+
+@tool()
 async def select_country(country: str) -> dict:
     """Set the default country for this server session to UZ, RU or KZ (in memory only; not saved). UZ enables account, cart and checkout tools; RU and KZ allow only search_products and get_storefront_status. Places no order."""
     global _selected_region
@@ -382,7 +413,7 @@ def _address_summary(entry, index):
             'short_address': address.get('shortAddress') or address.get('fullAddress')}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def use_address(address: str) -> dict:
     """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
@@ -419,7 +450,7 @@ async def use_address(address: str) -> dict:
     return {'selected': True, **_address_summary(entries[index], index)}
 
 
-@mcp.tool()
+@tool()
 async def get_storefront_status(country: str | None = None) -> dict:
     """Read-only: return homepage storefront info (currency, open/disabled, delivery time; UZ also reports login status) for the selected country or an explicit country. Not a quote and not proof of delivery coverage at an address."""
     country = _selected_region if country is None else country
@@ -435,7 +466,7 @@ async def get_storefront_status(country: str | None = None) -> dict:
         service = data.get("serviceInfo", {})
         return {"currency": service.get("currency"), "currency_sign": service.get("currencySign"), "advertised_delivery_time": service.get("deliveryTimeText"), "is_open": service.get("isOpen"), "is_disabled": service.get("isDisabled"), "passport_status": data.get("passportInfo", {}).get("status"), "address_coverage_verified": False, "note": "Homepage default storefront only; not a quote for your address."}
 
-@mcp.tool()
+@tool()
 async def search_products(query: str, limit: int = 20, longitude: float | None = None, latitude: float | None = None, country: str | None = None) -> dict:
     """Find products and prices. In Uzbekistan it searches at the address chosen with use_address (or at longitude, latitude); RU and KZ need coordinates and search anonymously. limit is 1–50."""
     if (longitude is None) != (latitude is None):
@@ -453,17 +484,14 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
     async with create_http() as http:
         return await Lavka(http).search(query, limit, tuple(location))
 
-@mcp.tool()
+@tool()
 @uz_only
 async def search_addresses(query: str) -> dict:
-    """Read-only: return address suggestions for a free-text query. Suggestions do not change the saved delivery address or confirm that delivery is available."""
+    """Find any address by text, e.g. "Amir Temur 1": street, area and coordinates. Pass the coordinates as longitude, latitude to search or cart tools to shop there."""
     async with create_http() as http:
-        result = await Lavka(http).suggest(query)
-        if not isinstance(result, (dict, list)):
-            raise UpstreamError("Unexpected address response")
-        return {"suggestions": result, "coverage_verified": False}
+        return {"addresses": await Lavka(http).suggest(query)}
 
-@mcp.tool()
+@tool()
 @uz_only
 async def count_saved_addresses() -> dict:
     """Read-only: return the number of saved favorite addresses without their details. Requires an authenticated Uzbekistan session."""
@@ -531,7 +559,7 @@ async def _add_products(client, wanted, titles):
     return {'added': added, 'unavailable': unavailable, 'limited': limited, 'cart': _cart_view(fresh)}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def get_cart(longitude: float | None = None, latitude: float | None = None) -> dict:
     """What's in the cart: items, quantities, prices, delivery cost, ETA and total in UZS, for the address chosen with use_address (or at longitude, latitude)."""
@@ -541,7 +569,7 @@ async def get_cart(longitude: float | None = None, latitude: float | None = None
         return _cart_view(await client.retrieve())
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def set_cart_quantity(product_id: str, quantity: int, longitude: float | None = None, latitude: float | None = None) -> dict:
     """Change the cart: set product_id to an exact quantity (0 removes it). Lavka applies its current price. Returns the updated cart."""
@@ -557,7 +585,7 @@ class CartRequest(TypedDict, total=False):
     quantity: int
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def add_to_cart(items: list[CartRequest], longitude: float | None = None, latitude: float | None = None) -> dict:
     """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query adds what you ordered before, or the only match; otherwise nothing is added for it and needs_choice lists up to 5 options to pick from — ask the user, then call again with the product_id. Reports what was added, needs a choice, not found, unavailable or capped at the store limit."""
@@ -608,7 +636,7 @@ async def _bought_before(lavka):
     return {line['product_id'] for order in history['orders'] for line in order['items']}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def repeat_order(order_id: str = 'last', longitude: float | None = None, latitude: float | None = None) -> dict:
     """Put everything from a past order back into the cart (order_id from list_order_history, or "last"). Lavka applies today's prices; items the store no longer has are left out and listed."""
@@ -631,7 +659,7 @@ async def repeat_order(order_id: str = 'last', longitude: float | None = None, l
     return {'order': {k: order[k] for k in ('order_id', 'created_at', 'total_uzs')}, **result}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def get_product(product_id: str, longitude: float | None = None, latitude: float | None = None) -> dict:
     """Product card: price, pack size, availability, description, calories and protein/fat/carbs per 100 g, shelf life, brand and country."""
@@ -640,7 +668,7 @@ async def get_product(product_id: str, longitude: float | None = None, latitude:
         return await Lavka(http).product(product_id, location)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def list_categories(longitude: float | None = None, latitude: float | None = None) -> dict:
     """The store's catalog: groups ("Молочный прилавок", "Готовая еда"…) with their categories and category_id, for the delivery address."""
@@ -649,7 +677,7 @@ async def list_categories(longitude: float | None = None, latitude: float | None
         return {'groups': await Lavka(http).categories(location)}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def get_category_products(category_id: str, subcategory: str | None = None, limit: int = 30,
                                 longitude: float | None = None, latitude: float | None = None) -> dict:
@@ -661,7 +689,7 @@ async def get_category_products(category_id: str, subcategory: str | None = None
         return await Lavka(http).category(category_id, location, subcategory, limit)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def list_saved_cards(longitude: float | None = None, latitude: float | None = None) -> dict:
     """Your saved cards as "**** 1234", for the address chosen with use_address (or at longitude, latitude)."""
@@ -673,7 +701,7 @@ async def list_saved_cards(longitude: float | None = None, latitude: float | Non
         return {'cards': cards.masked_cards}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
     """Past orders, newest first, with their items, total and address. For the next page pass next_older_than as older_than. limit is 1–21."""
@@ -681,7 +709,7 @@ async def list_order_history(limit: int = 21, older_than: str | None = None) -> 
         return await Lavka(http).order_history(limit, older_than)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def get_order(order_id: str) -> dict:
     """One past order in full: items, products, delivery, service fee, discount, total, address and status."""
@@ -689,7 +717,7 @@ async def get_order(order_id: str) -> dict:
         return await Lavka(http).order(order_id)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def get_payment_status(order_id: str) -> dict:
     """Payment status of an order (success, wait_user_action, failed…). When the bank asks for 3-D Secure it also returns redirect_url to open."""
@@ -699,7 +727,7 @@ async def get_payment_status(order_id: str) -> dict:
         return await payment_status(http, props, order_id)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def list_active_orders() -> dict:
     """Read-only: return the active-order tracking feed. An empty feed does not prove there are no orders and cannot reconcile an uncertain submission."""
@@ -726,7 +754,7 @@ async def list_active_orders() -> dict:
             raise UpstreamError('Unverified active-order response; no conclusion possible') from None
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def list_saved_addresses() -> dict:
     """Your saved delivery addresses with their index and name. Pick one for the session with use_address."""
@@ -736,7 +764,7 @@ async def list_saved_addresses() -> dict:
         return {'addresses': [{'index': i, 'address': entry['address']} for i, entry in enumerate(entries)]}
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
     """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing."""
@@ -772,7 +800,7 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
     return result
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def submit_order(order_preview_token: str, confirmed_total_uzs: str, explicit_confirmation: bool) -> dict:
     """Charges money: place the order from preview_order's token. Pass the exact total from the preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure."""
@@ -781,7 +809,7 @@ async def submit_order(order_preview_token: str, confirmed_total_uzs: str, expli
         return await submit(http, order_preview_token, confirmed_total_uzs, explicit_confirmation)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def reconcile_order_attempt(checked_order_history: bool, checked_payment: bool, accepts_duplicate_risk: bool, no_request_in_progress: bool, explicit_confirmation: bool) -> dict:
     """Local state only: record that you checked official order history and payment, that no request is in progress, and that you accept duplicate-order risk, then release the unknown checkout block. Verifies nothing, places no order, and cannot rule out delayed processing."""
@@ -791,7 +819,7 @@ async def reconcile_order_attempt(checked_order_history: bool, checked_payment: 
                      no_request_in_progress=no_request_in_progress, explicit_confirmation=explicit_confirmation)
 
 
-@mcp.tool()
+@tool()
 @uz_only
 async def cancel_order(order_id: str, explicit_confirmation: bool) -> dict:
     """Cancels an order: send at most one cancellation request for the exact order_id after explicit_confirmation=true. A response does not prove cancellation, refund status is unknown, and repeat cancellation attempts are blocked."""
