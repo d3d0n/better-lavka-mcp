@@ -25,22 +25,24 @@ No browser automation, no cookie copy-paste: you sign in by scanning a QR code w
 
 ## Stuff you do with it
 
-- **Ask what's on the shelf.** «Chilonzorda sut bormi?» — milk and its price at the nearest Lavka.
-- **Build the cart by talking.** «Добавь два кефира и хлеб» — done, and the assistant tells you the new total.
-- **Order in one sentence.** "Order it home, card ending 4242" — the assistant shows the address, items and total.
-- **Say yes.** The order goes out.
-- **Check on orders.** «Покажи прошлые заказы», «отмени заказ».
+- **Say where once.** «Доставляй домой» — the assistant picks your saved address, and every search and cart call uses it from then on.
+- **Ask what's on the shelf.** «Chilonzorda sut bormi?» — milk and its price at your Lavka.
+- **Shopping list in one message.** «Молоко, хлеб, шесть яиц» — all of it lands in the cart in one go; whatever the store doesn't have, you hear about.
+- **Same as last time.** «Повтори прошлый заказ» — everything from your last order goes back into the cart at today's prices, minus what's sold out.
+- **Read the label.** «Сколько калорий в этом хлебе?» — calories, protein, fat, carbs, ingredients and shelf life from the product card.
+- **Say yes.** The assistant shows address, items, total and card; you agree, the order goes out, and if the bank wants 3-D Secure you get the link.
+- **Check on orders.** «Что я заказывал?», «отмени заказ».
 - **Peek at Russia and Kazakhstan.** Browse the RU and KZ storefronts and search their products.
 
 ---
 
 ## Three little stories
 
-**Sunday restock.** You type *«закажи молоко, яйца и хлеб домой, картой 4242»*. The assistant finds them, fills the cart, shows you the total. You say «да», and breakfast is on its way.
+**Sunday restock.** You type *«повтори прошлый заказ домой»*. Potatoes, chicken, cottage cheese and the rest go back in the cart; the flatbread is sold out today, and the assistant says so. It shows the total, you say «да», and breakfast is on its way.
 
-**Recipe to cart.** You paste a plov recipe and say *«собери всё для этого на четверых»*. Rice, carrots, lamb, oil and cumin land in the cart in the right amounts. Anything out of stock, the assistant tells you and offers a swap.
+**Recipe to cart.** You paste a plov recipe and say *«собери всё для этого на четверых»*. The assistant turns it into a list, and rice, carrots, lamb, oil and cumin go into the cart in one request. Anything out of stock comes back to you with a suggestion to swap.
 
-**Same again.** *«Oxirgi buyurtmalarimni ko‘rsat»* The assistant lists your recent orders and answers in Uzbek, because that's how you asked.
+**Label check.** *«Bu nonda nechta kaloriya bor?»* The assistant opens the product card and answers in Uzbek: 240 kcal per 100 g, 7.7 g protein, three days of shelf life.
 
 ---
 
@@ -48,10 +50,11 @@ No browser automation, no cookie copy-paste: you sign in by scanning a QR code w
 
 | ✅ Works today | 🚧 Not yet |
 |---|---|
-| Sign in with a QR code from the Yandex app | 3-D Secure confirmation inside the chat |
-| Product and address search, cart editing | Scheduled delivery slots |
-| Saved addresses and cards, order history | Live order tracking |
-| Order to a saved address with a chosen card, cancel an order | |
+| Sign in with a QR code from the Yandex app | Live order tracking (courier, ETA) |
+| Pick a saved address once per session | Scheduled delivery slots |
+| Product search, product cards with nutrition, shopping lists, cart editing | |
+| Order history with items, repeat an order, order details | |
+| Order with a chosen card, payment status and 3-D Secure link, cancel an order | |
 | Browse the RU and KZ storefronts | Ordering in Russia and Kazakhstan |
 
 ---
@@ -91,23 +94,28 @@ Settings:
 
 ## Tools
 
-Twenty tools with plain verb + noun names, so the assistant picks the right one on the first try.
+Twenty-four tools with plain verb + noun names, so the assistant picks the right one on the first try.
 
 | Tool | What it does |
 |---|---|
+| `use_address` | Pick the delivery address for this session by name ("Дом", "Work") |
 | `search_products` | Find products and prices |
-| `get_cart` | What's in the cart and the total |
-| `set_cart_quantity` | Add, change or remove an item |
-| `list_saved_addresses` | Your saved addresses |
-| `list_saved_cards` | Your saved cards |
+| `get_product` | Product card: price, pack, nutrition, ingredients, shelf life |
+| `add_to_cart` | Add a whole shopping list in one go |
+| `repeat_order` | Put a past order back into the cart |
+| `get_cart` | What's in the cart, delivery and total |
+| `set_cart_quantity` | Change or remove one item |
 | `preview_order` | Address, card, items and total before ordering |
 | `submit_order` | Place the order |
+| `get_payment_status` | Payment status and 3-D Secure link |
+| `list_order_history` | Past orders with their items |
+| `get_order` | One past order in full |
 | `cancel_order` | Cancel an order |
 | `list_active_orders` | Whether any orders are currently tracked |
-| `list_order_history` | Past orders |
+| `list_saved_addresses` | Your saved addresses |
+| `list_saved_cards` | Your saved cards |
 | `start_login` · `get_login_status` · `cancel_login` | Sign in with a QR code |
 | `search_addresses` | Find an address by text |
-| `get_saved_address_coordinates` · `check_coordinates` | Turn an address into a delivery point |
 | `count_saved_addresses` | How many addresses are saved |
 | `get_storefront_status` | Is Lavka open, delivery time |
 | `select_country` | Switch between UZ, RU and KZ |

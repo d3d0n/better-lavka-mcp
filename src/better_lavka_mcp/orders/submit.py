@@ -244,8 +244,9 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation):
         data = None
     result = {'outcome':'unknown', 'http_status':response.status_code, 'warning':WARNING}
     if response.status_code == 200 and isinstance(data, dict) and isinstance(data.get('orderId'), str) and data['orderId']:
-        _finish(nonce, 'submitted', 'Order ID returned; payment unverified')
-        result.update(outcome='submitted', order_id=data['orderId'], payment_status='unverified', note='Order ID returned; independently check order status and payment.')
+        _finish(nonce, 'submitted', 'Order ID returned')
+        result.update(outcome='submitted', order_id=data['orderId'])
+        result.update(await _await_payment(http, props, data['orderId']))
     elif 400 <= response.status_code <= 599:
         projection = sanitize_rejection(response.status_code, data)
         result.update(projection)
@@ -275,6 +276,31 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation):
         _finish(nonce, 'unknown', 'Unclassified upstream response')
         result['note'] = 'Server reason and order outcome cannot be determined; reconcile before a fresh attempt.'
     return result
+
+
+PAYMENT_POLL_ATTEMPTS = 6
+PAYMENT_POLL_INTERVAL = 2.0
+
+
+async def _await_payment(http, props, order_id):
+    """Poll payment status briefly after submit; never resubmits and never raises."""
+    import asyncio
+    from better_lavka_mcp.payment import TERMINAL_PAYMENT_STATUSES, payment_status
+    last = {'payment_status': 'unknown', 'redirect_url': None}
+    for attempt in range(PAYMENT_POLL_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(PAYMENT_POLL_INTERVAL)
+        try:
+            last = await payment_status(http, props, order_id)
+        except Exception:
+            continue
+        if last['payment_status'] in TERMINAL_PAYMENT_STATUSES or last['redirect_url']:
+            break
+    if last['redirect_url']:
+        last['note'] = 'The bank asks for 3-D Secure: open redirect_url to confirm the payment, then check get_payment_status.'
+    elif last['payment_status'] not in TERMINAL_PAYMENT_STATUSES:
+        last['note'] = 'Payment is still processing; check get_payment_status in a moment.'
+    return last
 
 
 async def cancel(http, order_id, explicit_confirmation, history):

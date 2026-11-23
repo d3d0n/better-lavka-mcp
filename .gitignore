@@ -85,6 +85,7 @@
 !/tests/test_region_state.py
 !/tests/test_regional_routing.py
 !/tests/test_regional_storefront.py
+!/tests/test_shopping_tools.py
 !/tests/test_service_fee_mapping.py
 !/tests/test_submit_diagnostics.py
 !/tests/test_submit_payload.py

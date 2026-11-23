@@ -1,0 +1,149 @@
+"""Shopping tools against a synthetic in-memory Lavka shaped like lavka.yandex.uz (2026-11)."""
+import json
+
+import httpx
+import pytest
+
+from better_lavka_mcp import server
+from better_lavka_mcp.orders import submit as orders
+
+HOME = [69.2, 41.3]
+# id -> (title as Lavka sends it, current price, unavailable on depot, quantity limit)
+CATALOG = {
+    'milk': ('Мо\xadло\xadко <notr>Example</notr> 2,5%', 15990, False, '24'),
+    'bread': ('Хлеб', 4990, True, '0'),
+    'kaymak': ('Кай\xadмак', 21990, False, '3'),
+    'eggs': ('Яйца', 25990, False, '10'),
+}
+ORDER = {'orderId': 'order-1', 'createdAt': '2026-01-01T09:00:00+00:00', 'status': 'closed',
+         'calculation': {'finalCost': '99000', 'items': [
+             {'name': 'Молоко', 'count': 2, 'cost': '14990', 'productId': 'milk'},
+             {'name': 'Хлеб', 'count': 1, 'cost': '4500', 'productId': 'bread'},
+             {'name': 'Каймак', 'count': 5, 'cost': '20990', 'productId': 'kaymak'}]},
+         'contact': {'phone': 'secret'}}
+
+
+class FakeLavka:
+    def __init__(self):
+        self.cart, self.version, self.updates = {}, 1, []
+
+    def cart_body(self):
+        items = []
+        for pid, qty in self.cart.items():
+            title, price, unavailable, limit = CATALOG[pid]
+            items.append({'id': pid, 'title': title, 'quantity': str(qty), 'price': str(price), 'amount': '1 шт',
+                          'isUnavailableOnDepot': unavailable, 'quantityLimit': limit})
+        total = sum(CATALOG[pid][1] * qty for pid, qty in self.cart.items())
+        return {'cartId': 'cart-1', 'cartVersion': self.version, 'items': items, 'totalPriceValue': str(total),
+                'availableForCheckout': bool(items), 'orderConditions': {'deliveryCost': '10', 'eta': '15 мин'}}
+
+    def handle(self, request):
+        path = request.url.path
+        if request.url.host == 'yandex.uz':
+            return httpx.Response(200, headers={'set-cookie': 'yandexuid=1; Domain=.yandex.uz; Path=/'})
+        if request.method == 'GET':
+            props = {'pageData': {'passportInfo': {'status': 'VALID'}, 'serviceInfo': {'currency': 'UZS', 'currencySign': 'сум'}}}
+            return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
+        body = json.loads(request.content)
+        if path.endswith('/search/v3/lavka'):
+            assert body['position'] == {'location': HOME}
+            hits = [pid for pid, (title, *_rest) in CATALOG.items() if body['text'].casefold() in title.replace('\xad', '').casefold()]
+            return httpx.Response(200, json={'cacheProducts': [{'id': pid, 'title': CATALOG[pid][0], 'currentPrice': CATALOG[pid][1], 'available': not CATALOG[pid][2]} for pid in hits]})
+        if path.endswith('/cart/v1/retrieve'):
+            assert body['position'] == {'location': HOME}
+            return httpx.Response(200, json=self.cart_body())
+        if path.endswith('/cart/v1/update'):
+            assert body['cartVersion'] == self.version and all(line['price'] for line in body['items'])
+            self.updates.append({line['id']: int(line['quantity']) for line in body['items']})
+            for line in body['items']:
+                qty = int(line['quantity'])
+                if qty:
+                    self.cart[line['id']] = qty
+                else:
+                    self.cart.pop(line['id'], None)
+            self.version += 1
+            return httpx.Response(200, json={})
+        if path.endswith('/order-log/v1/retrieve'):
+            return httpx.Response(200, json={'orders': [ORDER]})
+        if path.endswith('/v1/product'):
+            return httpx.Response(200, json={'product': {
+                'id': body['productId'], 'title': 'Кар\xadто\xadфель', 'brand': 'Example Farm', 'currentPrice': 16990, 'amount': '800 г',
+                'available': True, 'quantityLimit': '24', 'description': 'Для пюре.',
+                'descriptionBlocks': [{'title': 'Срок годности ', 'value': '15 д.', 'type': 'text'}, {'title': 'Страна', 'value': 'Узбекистан', 'type': 'text'}],
+                'options': {'ingredients': {'description': '', 'pfcTraits': [
+                    {'id': 'calories', 'measures': {'per100g': '77'}}, {'id': 'protein', 'measures': {'per100g': '2'}},
+                    {'id': 'fat', 'measures': {'per100g': '0,4'}}, {'id': 'carbohydrate', 'measures': {'per100g': '16,3'}}]}}}})
+        if path.endswith('/payments/v1/status'):
+            return httpx.Response(200, json={'status': 'wait_user_action', 'payload': {'redirectUrl': 'https://trust.example/3ds'}})
+        raise AssertionError(path)
+
+
+@pytest.fixture
+def lavka(monkeypatch):
+    fake = FakeLavka()
+    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
+    monkeypatch.setattr(server, '_delivery', {'address_id': 'a-home', 'location': HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
+    lavka.cart = {'eggs': 1}
+    result = await server.add_to_cart([{'query': 'молоко', 'quantity': 2}, {'query': 'хлеб'}, {'query': 'каймак', 'quantity': 4},
+                                       {'query': 'ананас'}, {'product_id': 'eggs'}])
+    assert lavka.updates[0] == {'milk': 2, 'kaymak': 4, 'eggs': 2}
+    assert lavka.updates[1] == {'kaymak': 3}
+    assert result['not_found'] == ['хлеб', 'ананас']
+    assert result['limited'] == [{'title': 'Каймак', 'requested': 4, 'max': 3}]
+    assert {(a['title'], a['quantity']) for a in result['added']} == {('Молоко Example 2,5%', 2), ('Каймак', 3), ('Яйца', 2)}
+    assert {i['title'] for i in result['cart']['items']} == {'Молоко Example 2,5%', 'Каймак', 'Яйца'}
+
+
+@pytest.mark.asyncio
+async def test_repeat_last_order_drops_what_the_store_cannot_sell(lavka):
+    result = await server.repeat_order()
+    assert lavka.updates == [{'milk': 2, 'bread': 1, 'kaymak': 5}, {'bread': 0, 'kaymak': 3}]
+    assert result['order'] == {'order_id': 'order-1', 'created_at': '2026-01-01T09:00:00+00:00', 'total_uzs': '99000'}
+    assert result['unavailable'] == ['Хлеб'] and result['limited'][0]['max'] == 3
+    assert lavka.cart == {'milk': 2, 'kaymak': 3}
+    assert result['cart']['available_for_checkout'] is True and 'secret' not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_set_cart_quantity_needs_no_price_or_coordinates(lavka):
+    result = await server.set_cart_quantity('milk', 3)
+    assert lavka.updates == [{'milk': 3}]
+    assert result['items'][0] == {'id': 'milk', 'title': 'Молоко Example 2,5%', 'quantity': '3', 'price_uzs': '15990', 'pack': '1 шт', 'available': True}
+    assert (result['delivery_uzs'], result['eta']) == ('10', '15 мин')
+
+
+@pytest.mark.asyncio
+async def test_get_product_parses_nutrition_and_details(lavka):
+    product = await server.get_product('potato')
+    assert product['title'] == 'Картофель' and product['pack'] == '800 г'
+    assert product['nutrition_per_100g'] == {'kcal': 77.0, 'protein': 2.0, 'fat': 0.4, 'carbs': 16.3}
+    assert product['details'] == {'Срок годности': '15 д.', 'Страна': 'Узбекистан'}
+
+
+@pytest.mark.asyncio
+async def test_payment_status_returns_3ds_link(lavka):
+    assert await server.get_payment_status('order-1') == {'payment_status': 'wait_user_action', 'redirect_url': 'https://trust.example/3ds'}
+
+
+@pytest.mark.asyncio
+async def test_preview_order_defaults_to_session_address_and_only_card(lavka, monkeypatch):
+    seen = {}
+    async def addresses(http):
+        return None, [{'addressId': 'a-work', 'address': {'location': [69.3, 41.2]}}, {'addressId': 'a-home', 'address': {'location': HOME}}]
+    class Cards:
+        def __init__(self, http, props, location):
+            seen['location'] = location
+        async def lookup(self):
+            return type('R', (), {'masked_cards': ['**** 4242']})()
+    async def preview(http, index, suffix):
+        return {'index': index, 'suffix': suffix}
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(orders, 'preview', preview)
+    monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
+    assert await server.preview_order() == {'index': 1, 'suffix': '4242'}
+    assert seen['location'] == HOME

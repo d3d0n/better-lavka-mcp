@@ -32,7 +32,7 @@ async def test_write_fails_closed_when_verification_switched_cart_identity():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         c = CartClient(http, PROPS, LOCATION, "сум")
         with pytest.raises(UpstreamError, match="(?i)(context|identity|cart)"):
-            await c.set_item("p", 1, 100)
+            await c.set_items({"p": 1})
 
 
 @pytest.mark.asyncio
@@ -53,4 +53,4 @@ async def test_write_fails_closed_when_unrelated_item_disappears():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         c = CartClient(http, PROPS, LOCATION, "сум")
         with pytest.raises(UpstreamError, match="(?i)(unrelated|changed|preserv|cart)"):
-            await c.set_item("p", 1, 100)
+            await c.set_items({"p": 1})

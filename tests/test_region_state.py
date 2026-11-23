@@ -26,7 +26,7 @@ async def test_selection_changes_default_status_and_explicit_override(monkeypatc
 async def test_all_uz_tools_refuse_selected_ru_and_kz(monkeypatch):
     names = {t.name for t in await server.mcp.list_tools()}
     allowed = {'select_country', 'get_storefront_status', 'search_products'}
-    expected = {'check_coordinates', 'get_saved_address_coordinates', 'search_addresses', 'count_saved_addresses', 'get_cart', 'set_cart_quantity', 'list_saved_cards', 'list_order_history', 'list_active_orders', 'list_saved_addresses', 'preview_order', 'submit_order', 'reconcile_order_attempt', 'cancel_order', 'start_login', 'get_login_status', 'cancel_login'}
+    expected = {'use_address', 'search_addresses', 'count_saved_addresses', 'get_cart', 'set_cart_quantity', 'add_to_cart', 'repeat_order', 'get_product', 'list_saved_cards', 'list_order_history', 'get_order', 'get_payment_status', 'list_active_orders', 'list_saved_addresses', 'preview_order', 'submit_order', 'reconcile_order_attempt', 'cancel_order', 'start_login', 'get_login_status', 'cancel_login'}
     assert names - allowed == expected
     monkeypatch.setattr(server, 'create_http', lambda: pytest.fail('must not touch UZ'))
     try:

@@ -1,9 +1,13 @@
-"""Experimental Uzbekistan cart access, without an order-submission endpoint."""
+"""Uzbekistan cart access: read the cart and set absolute item quantities."""
 import uuid
 from decimal import Decimal, InvalidOperation
 
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
+
+# Lavka rejects an empty line price but reprices every line to the current
+# catalog price (verified live on lavka.yandex.uz for new and existing items).
+PLACEHOLDER_PRICE = '1'
 
 
 class CartClient:
@@ -43,16 +47,19 @@ class CartClient:
             raise UpstreamError('Unexpected cart response')
         return cart
 
-    async def set_item(self, product_id, quantity, price):
-        if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not 0 <= quantity <= 50:
-            raise ValueError('A product id and a quantity between 0 and 50 are required')
-        try:
-            amount = Decimal(str(price))
-            if not amount.is_finite() or amount < 0:
-                raise ValueError
-        except (InvalidOperation, ValueError):
-            raise ValueError('A nonnegative price is required') from None
-        def quantities(items):
+    async def set_items(self, quantities):
+        """Set absolute quantities for several products in one update; 0 removes.
+
+        Lavka requires a non-empty price per line but reprices every line itself,
+        so the current cart price is reused and new products get a placeholder.
+        """
+        if not isinstance(quantities, dict) or not quantities:
+            raise ValueError('At least one product is required')
+        for product_id, quantity in quantities.items():
+            if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not 0 <= quantity <= 50:
+                raise ValueError('Each product needs an id and a quantity between 0 and 50')
+
+        def counts(items):
             result = {}
             for item in items:
                 if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id'] or item['id'] in result:
@@ -67,8 +74,12 @@ class CartClient:
             return result
 
         cart = await self.retrieve()
-        before = quantities(cart['items'])
-        body = {'items': [{'id': product_id, 'quantity': str(quantity), 'pricePerCount': '1', 'quantityType': 'unit', 'price': str(amount), 'title': '', 'currency': 'UZS'}],
+        before = counts(cart['items'])
+        prices = {item['id']: str(item.get('price') or '') for item in cart['items']}
+        lines = [{'id': product_id, 'quantity': str(quantity), 'pricePerCount': '1', 'quantityType': 'unit',
+                  'price': prices.get(product_id) or PLACEHOLDER_PRICE, 'title': '', 'currency': 'UZS'}
+                 for product_id, quantity in quantities.items()]
+        body = {'items': lines,
                 'deliveryTimeInfo': cart.get('deliveryTimeInfo'), 'deliveryType': cart.get('deliveryType'),
                 'position': {'location': self.location}, 'additionalData': {}, 'cartId': cart['cartId'],
                 'cartVersion': cart['cartVersion'], 'idempotencyToken': uuid.uuid4().hex,
@@ -77,11 +88,12 @@ class CartClient:
         fresh = await self.retrieve()
         if fresh['cartId'] != cart['cartId']:
             raise UpstreamError('Cart identity changed during update; outcome is uncertain')
-        after = quantities(fresh['items'])
-        if after.get(product_id, 0) != quantity:
-            raise UpstreamError('Cart readback did not verify requested item quantity')
-        before.pop(product_id, None)
-        after.pop(product_id, None)
+        after = counts(fresh['items'])
+        for product_id, quantity in quantities.items():
+            if after.get(product_id, 0) != quantity:
+                raise UpstreamError('Cart readback did not verify requested item quantity')
+            before.pop(product_id, None)
+            after.pop(product_id, None)
         if before != after:
             raise UpstreamError('Unrelated cart items changed during update; outcome is uncertain')
         return fresh

@@ -26,6 +26,9 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
             body=json.loads(request.content); assert body['position']['flat']=='5'; assert body['useRover'] is False; assert body['paymentMethodId']=='private'
             return httpx.Response(200,json={'orderId':'o1','newbie':False,'trackPayment':{'modalPlace':'none'}})
         if path.endswith('cancel'): return httpx.Response(200,json={})
+        if path.endswith('payments/v1/status'):
+            assert json.loads(request.content) == {'orderId': 'o1', 'paymentType': 'card'}
+            return httpx.Response(200,json={'status':'wait_user_action','payload':{'redirectUrl':'https://trust.example/3ds'}})
         raise AssertionError(path)
     async def boot(self): self.props=props; return props
     monkeypatch.setattr(server.Lavka,'bootstrap',boot)
@@ -38,6 +41,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         assert preview['address']['flat']=='5' and preview['total_uzs']=='100'
         result=await orders.submit(http,preview['preview_token'],'100',True)
         assert result['order_id']=='o1'
+        assert result['payment_status']=='wait_user_action' and result['redirect_url']=='https://trust.example/3ds'
         with pytest.raises(Exception): await orders.submit(http,preview['preview_token'],'100',True)
         async def history(): return {'orders':[{'order_id':'o1','status':'cancelled'}]}
         result=await orders.cancel(http,'o1',True,history)
@@ -121,10 +125,15 @@ async def test_success_allows_fresh_preview(tmp_path, monkeypatch):
     binding = {"cart":{"cartId":"c","cartVersion":1,"orderFlowVersion":"v","totalPriceValue":"10","items":[{"id":"x"}]},"position":{"location":[69.2,41.3]},"card":{"type":"card","id":"id"},"index":0,"suffix":"1234"}
     async def snap(*args): return binding, {}
     monkeypatch.setattr(orders, "snapshot", snap)
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200,json={"orderId":"one"}))) as http:
+    def handle(request):
+        if request.url.path.endswith("payments/v1/status"):
+            return httpx.Response(200, json={"status": "success"})
+        return httpx.Response(200, json={"orderId": "one"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         http.cookies.set("Session_id","test",domain=".yandex.uz",path="/")
         p = await orders.preview(http, 0, "1234")
-        assert (await orders.submit(http,p["preview_token"],"10",True))["outcome"] == "submitted"
+        result = await orders.submit(http,p["preview_token"],"10",True)
+        assert result["outcome"] == "submitted" and result["payment_status"] == "success"
         assert (await orders.preview(http, 0, "1234"))["preview_token"]
 
 

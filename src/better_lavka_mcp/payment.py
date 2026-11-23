@@ -58,3 +58,30 @@ class PaymentClient:
             masked.append('**** ' + match.group(1))
             ids.append(card_id)
         return PaymentResults(masked, ids)
+
+
+TERMINAL_PAYMENT_STATUSES = frozenset({'success', 'paid', 'hold', 'failed', 'rejected', 'cancel', 'canceled', 'cancelled'})
+
+
+async def payment_status(http, props, order_id):
+    """Read one order's payment status; returns status and a 3-D Secure redirect when the bank asks for one."""
+    if not isinstance(order_id, str) or not order_id or len(order_id) > 128:
+        raise ValueError('An order id is required')
+    headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
+               'X-Csrf-Token': props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+    try:
+        r = await http.post(BASE + '/api/v1/providers/payments/v1/status', headers=headers,
+                            json={'orderId': order_id, 'paymentType': 'card'})
+    except Exception:
+        raise UpstreamError('Payment status request failed') from None
+    if r.status_code != 200:
+        raise UpstreamError(f'Payment status HTTP {r.status_code}')
+    try:
+        data = r.json()
+    except ValueError:
+        raise UpstreamError('Payment status returned non-JSON') from None
+    if not isinstance(data, dict) or not isinstance(data.get('status'), str):
+        raise UpstreamError('Unexpected payment status response')
+    payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
+    redirect = payload.get('redirectUrl') or data.get('redirectUrl')
+    return {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None}

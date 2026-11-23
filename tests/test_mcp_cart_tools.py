@@ -26,7 +26,7 @@ async def test_cart_mcp_read_update_and_masked_cards(monkeypatch):
         raise AssertionError(path)
     monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     assert (await server.get_cart(69, 41))['items'] == []
-    result = await server.set_cart_quantity(69, 41, 'product', 1, '100')
+    result = await server.set_cart_quantity('product', 1, 69, 41)
     assert result['items'][0]['quantity'] == '1'
     assert 'secret-cart' not in json.dumps(result)
     assert (await server.list_saved_cards(69, 41))['cards'] == ['**** 3456']

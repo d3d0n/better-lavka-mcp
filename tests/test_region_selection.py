@@ -1,26 +1,52 @@
 import pytest
-import json
 from better_lavka_mcp import server
 from better_lavka_mcp.orders import submit as orders
-import httpx
+
+# Synthetic saved addresses shaped like get-favorite-addresses on lavka.yandex.uz.
+ENTRIES = [
+    {'addressId': 'a-home', 'address': {'label': 'Дом', 'shortAddress': 'Example street, 1', 'location': [69.2, 41.3], 'flat': 'private'}},
+    {'addressId': 'a-work', 'address': {'label': 'Работа', 'shortAddress': 'Sample avenue, 7', 'location': [69.3, 41.2]}},
+    {'addressId': 'a-mom', 'address': {'label': '', 'shortAddress': 'Sample avenue, 9', 'location': [69.4, 41.1]}},
+]
+
+
+@pytest.fixture
+def saved(monkeypatch):
+    async def addresses(http):
+        return None, ENTRIES
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(server, 'create_http', lambda: __import__('httpx').AsyncClient())
+    monkeypatch.setattr(server, '_delivery', None)
 
 
 @pytest.mark.asyncio
-async def test_detect_location_requires_unambiguous_favorite(monkeypatch):
-    entries = [{'address': {'location': [69.2, 41.3], 'flat': 'private'}}]
-    async def addresses(http):
-        return None, entries
-    monkeypatch.setattr(orders, 'addresses', addresses)
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient())
-    result = await server.get_saved_address_coordinates('UZ')
-    assert result['source'] == 'single_saved_address'
-    assert result['longitude'] == 69.2 and result['address_selected'] is False
-    assert 'private' not in str(result)
-    entries.append({'address': {'location': [69.2, 41.3]}})
-    result = await server.get_saved_address_coordinates('UZ')
-    assert result['source'] == 'ambiguous' and 'longitude' not in result
-    selected = await server.get_saved_address_coordinates('UZ', saved_address_index=1)
-    assert selected['source'] == 'saved_address_index'
+async def test_use_address_matches_name_alias_street_or_index(saved):
+    assert (await server.use_address('home'))['label'] == 'Дом'
+    assert server._location() == [69.2, 41.3]
+    assert (await server.use_address('работа'))['index'] == 1
+    assert (await server.use_address('avenue, 9'))['index'] == 2
+    assert (await server.use_address('0'))['label'] == 'Дом'
+    assert 'private' not in str(await server.use_address('дом'))
+
+
+@pytest.mark.asyncio
+async def test_use_address_returns_candidates_when_unclear(saved):
+    result = await server.use_address('avenue')
+    assert result['selected'] is False and result['reason'] == 'ambiguous'
+    assert [c['index'] for c in result['candidates']] == [1, 2]
+    result = await server.use_address('dacha')
+    assert result['reason'] == 'not_found' and len(result['candidates']) == 3
+    assert server._delivery is None
+
+
+@pytest.mark.asyncio
+async def test_location_needs_address_or_valid_coordinates(saved):
+    with pytest.raises(ValueError, match='use_address'):
+        server._location()
+    assert server._location(69.0, 41.0) == [69.0, 41.0]
+    for lon, lat in [(54, 41), (69, 47), (float('nan'), 41), (True, 41), (69, None)]:
+        with pytest.raises(ValueError):
+            server._location(lon, lat)
 
 
 @pytest.mark.asyncio
@@ -33,45 +59,8 @@ async def test_country_selection_fails_closed_without_network(monkeypatch):
         assert result['uz_account_and_checkout_tools_available'] is (country == 'UZ')
     with pytest.raises(ValueError, match='Unsupported'):
         await server.select_country('US')
-    await server.select_country('UZ')
     for country in ('RU', 'KZ'):
+        await server.select_country(country)
         with pytest.raises(ValueError, match='UZ-only'):
-            await server.get_saved_address_coordinates(country)
-
-
-@pytest.mark.asyncio
-async def test_explicit_location_is_stateless_and_not_coverage():
-    result = await server.check_coordinates('UZ', longitude=69.2, latitude=41.3)
-    assert result['longitude'] == 69.2 and result['latitude'] == 41.3
-    assert result['coverage_verified'] is False and result['address_selected'] is False
-    assert result['source'] == 'coordinates'
-    assert 'cart' in result['note'].lower()
-
-
-@pytest.mark.asyncio
-async def test_location_bounds_and_invalid_values_fail_closed():
-    for lon, lat in [(54, 41), (69, 47), (float('nan'), 41), (True, 41)]:
-        with pytest.raises(ValueError):
-            await server.check_coordinates('UZ', lon, lat)
-    with pytest.raises(ValueError, match='Unsupported'):
-        await server.check_coordinates('RU', 69, 41)
-
-
-@pytest.mark.asyncio
-async def test_detection_uses_authenticated_read_only_endpoint(monkeypatch):
-    calls = []
-    def handle(request):
-        calls.append((request.method, request.url.path))
-        if request.url.host == 'yandex.uz':
-            return httpx.Response(200, headers={'set-cookie': 'yandexuid=123; Domain=.yandex.uz; Path=/'})
-        if request.method == 'GET':
-            props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
-            return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
-        assert request.url.path.endswith('get-favorite-addresses')
-        return httpx.Response(200, json=[{'address': {'location': [69.2, 41.3], 'flat': 'secret'}}])
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    result = await server.get_saved_address_coordinates('UZ')
-    assert result['source'] == 'single_saved_address' and 'secret' not in str(result)
-    assert calls == [('GET', '/favicon.ico'), ('GET', '/'), ('POST', '/api/v1/providers/address/v1/get-favorite-addresses')]
-    names = {tool.name for tool in await server.mcp.list_tools()}
-    assert {'select_country', 'check_coordinates', 'get_saved_address_coordinates'} <= names
+            await server.use_address('home')
+    await server.select_country('UZ')

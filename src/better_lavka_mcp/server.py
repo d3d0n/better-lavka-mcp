@@ -1,11 +1,13 @@
-"""Unofficial, read-only Yandex Lavka Uzbekistan MCP server."""
+"""Unofficial Yandex Lavka Uzbekistan MCP server."""
 import html
 import json
 import logging
 import os
 import re
+from decimal import Decimal, InvalidOperation
 from http.cookiejar import Cookie
 from pathlib import Path
+from typing import TypedDict
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -15,6 +17,42 @@ from better_lavka_mcp.errors import UpstreamError
 STATE = os.path.expanduser(os.environ.get("YANDEX_SESSION_FILE", "~/.local/share/yandex-lavka-mcp/session.json"))
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+def clean_text(value):
+    """Strip Lavka's display markup: HTML entities, <notr> tags, soft hyphens."""
+    text = html.unescape(re.sub(r"</?notr>", "", str(value or "")))
+    return text.replace("\xad", "").replace("\xa0", " ")
+
+
+def _number(value):
+    """Lavka sends decimals as strings with a comma ("0,4"); return float or None."""
+    try:
+        return float(str(value).replace(",", ".").replace("\xa0", "").replace(" ", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _order_view(item, detailed=False):
+    if not isinstance(item, dict) or not isinstance(item.get('orderId'), str) or not item['orderId']:
+        raise UpstreamError('Unexpected order history entry')
+    calc = item.get('calculation') if isinstance(item.get('calculation'), dict) else {}
+    lines = []
+    for line in calc.get('items') or []:
+        if isinstance(line, dict) and line.get('productId'):
+            lines.append({'product_id': line['productId'], 'name': clean_text(line.get('name')),
+                          'quantity': line.get('count'), 'price_uzs': line.get('cost')})
+    destinations = item.get('destinations') if isinstance(item.get('destinations'), list) else []
+    view = {'order_id': item['orderId'], 'short_order_id': item.get('shortOrderId'),
+            'created_at': item.get('createdAt'), 'closed_at': item.get('closedAt'),
+            'status': item.get('status'), 'status_text': item.get('statusText'),
+            'total_uzs': calc.get('finalCost') or item.get('cartTotalPrice'),
+            'address': destinations[0].get('shortText') if destinations and isinstance(destinations[0], dict) else None,
+            'items': lines}
+    if detailed:
+        view.update({'products_uzs': item.get('productsPrice'), 'delivery_uzs': calc.get('deliveryCost') or item.get('deliveryCost'),
+                     'service_fee_uzs': calc.get('serviceFeeV2') or item.get('serviceFeeV2'), 'discount_uzs': calc.get('discount')})
+    return view
+
 
 class Lavka:
     def __init__(self, http, region_http=None):
@@ -39,7 +77,7 @@ class Lavka:
         return self.props
 
     async def call(self, path, body):
-        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/geo/v1/suggest", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve"):
+        if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/geo/v1/suggest", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product"):
             raise ValueError("Endpoint is not allowlisted")
         p = self.props or await self.bootstrap()
         locale = p.get("pageEnv", {}).get("locale", "ru-RU")
@@ -89,7 +127,7 @@ class Lavka:
         products = []
         for item in raw["cacheProducts"][:limit]:
             if isinstance(item, dict):
-                products.append({"id": item.get("id"), "title": html.unescape(re.sub(r"</?notr>", "", str(item.get("title") or ""))), "price": item.get("currentPrice"), "currency": "UZS", "quantity": item.get("amount"), "available": item.get("available")})
+                products.append({"id": item.get("id"), "title": clean_text(item.get("title")), "price": item.get("currentPrice"), "currency": "UZS", "quantity": item.get("amount"), "available": item.get("available")})
         return {"products": products, "location_supplied": location is not None, "currency_source": region_source, "note": "Availability and price are location dependent; no delivery coverage is implied."}
 
     async def suggest(self, query):
@@ -106,41 +144,65 @@ class Lavka:
             raise UpstreamError("Unexpected saved addresses response")
         return {"count": len(result)}
 
-    async def order_history(self, count=21, older_than=None):
-        from datetime import datetime
-        if type(count) is not int or not 1 <= count <= 21:
-            raise ValueError('count must be between 1 and 21')
-        if older_than is not None:
-            try:
-                if not isinstance(older_than, str) or len(older_than) > 64:
-                    raise ValueError()
-                dt = datetime.fromisoformat(older_than.replace('Z', '+00:00'))
-                if dt.tzinfo is None:
-                    raise ValueError()
-            except ValueError:
-                raise ValueError('older_than must be a timezone-aware ISO timestamp') from None
-        p = self.props or await self.bootstrap()
-        if p.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
+    def _require_login(self, props):
+        if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
             raise UpstreamError('An authenticated Uzbekistan session is required')
-        uids = [c.value for c in self.http.cookies.jar if c.name == 'yandexuid' and c.domain in ('.yandex.uz', 'yandex.uz') and c.path == '/' and not c.is_expired()]
-        if len(uids) != 1 or not re.fullmatch(r'[0-9]{1,64}', uids[0]):
-            raise UpstreamError('Uzbekistan identity cookie missing or ambiguous')
+
+    async def _order_log(self, range_):
+        self._require_login(self.props or await self.bootstrap())
+        data = await self.call('/api/v1/providers/order-log/v1/retrieve', {'range': range_, 'includeServiceMetadata': False})
+        if not isinstance(data, dict) or not isinstance(data.get('orders'), list):
+            raise UpstreamError('Unexpected order history response')
+        return data['orders']
+
+    async def order_history(self, count=21, older_than=None):
+        if type(count) is not int or not 1 <= count <= 21:
+            raise ValueError('limit must be between 1 and 21')
         range_ = {'count': count}
         if older_than is not None:
+            if not isinstance(older_than, str) or not older_than or len(older_than) > 128:
+                raise ValueError('older_than must be the order_id of the last order on the previous page')
             range_['olderThan'] = older_than
-        data = await self.call('/api/v1/providers/order-log/v1/retrieve', {'range': range_, 'userIdentity': {'yandexUid': uids[0], 'boundYandexUids': []}, 'includeServiceMetadata': False})
-        if not isinstance(data, dict) or not isinstance(data.get('orders'), list) or not isinstance(data.get('tabs'), dict) or len(data['orders']) > count:
-            raise UpstreamError('Unexpected order history response')
-        orders = []
-        fields = {'order_id':'orderId', 'short_order_id':'shortOrderId', 'created_at':'createdAt', 'status':'status', 'status_text':'statusText', 'closed_at':'closedAt'}
-        for item in data['orders']:
-            if not isinstance(item, dict) or not all(isinstance(item.get(k), str) and item[k] for k in ('orderId', 'createdAt', 'status')):
-                raise UpstreamError('Unexpected order history entry')
-            view = {k: item.get(v) for k, v in fields.items()}
-            if any(v is not None and (not isinstance(v, str) or len(v) > 256 or any(ord(c) < 32 for c in v)) for v in view.values()):
-                raise UpstreamError('Unexpected order history field')
-            orders.append(view)
-        return {'orders': orders, 'next_older_than': orders[-1]['created_at'] if len(orders) == count else None, 'note': 'Point-in-time history; pagination uses the last creation timestamp and may not capture tied timestamps.'}
+        orders = [_order_view(item) for item in await self._order_log(range_)][:count]
+        return {'orders': orders, 'next_older_than': orders[-1]['order_id'] if len(orders) == count else None}
+
+    async def order(self, order_id):
+        if not isinstance(order_id, str) or not order_id or len(order_id) > 128:
+            raise ValueError('An order id is required')
+        orders = [item for item in await self._order_log({'orderId': order_id}) if isinstance(item, dict) and item.get('orderId') == order_id]
+        if not orders:
+            raise ValueError('Order not found')
+        return _order_view(orders[0], detailed=True)
+
+    async def product(self, product_id, location):
+        if not isinstance(product_id, str) or not product_id or len(product_id) > 256:
+            raise ValueError('A product id is required')
+        p = self.props or await self.bootstrap()
+        info = p.get('pageData', {}).get('serviceInfo', {})
+        body = {'depotType': 'regular', 'currencySign': info.get('currencySign'), 'position': {'location': list(location)},
+                'productId': product_id, 'needCatalogPaths': True, 'isEcomboReward': False,
+                'rewardPriceTemplate': '', 'enableUnavailable': True}
+        raw = await self.call('/api/v1/providers/v1/product', body)
+        item = raw.get('product') if isinstance(raw, dict) else None
+        if not isinstance(item, dict) or not item.get('id'):
+            raise UpstreamError('Unexpected product response')
+        options = item.get('options') if isinstance(item.get('options'), dict) else {}
+        ingredients = options.get('ingredients') if isinstance(options.get('ingredients'), dict) else {}
+        names = {'calories': 'kcal', 'protein': 'protein', 'fat': 'fat', 'carbohydrate': 'carbs'}
+        per_100g = {}
+        for trait in ingredients.get('pfcTraits') or []:
+            if isinstance(trait, dict) and trait.get('id') in names:
+                per_100g[names[trait['id']]] = _number((trait.get('measures') or {}).get('per100g'))
+        details = {clean_text(block.get('title')).strip(): clean_text(block.get('value')).strip()
+                   for block in item.get('descriptionBlocks') or []
+                   if isinstance(block, dict) and block.get('title') and block.get('value')}
+        return {'id': item['id'], 'title': clean_text(item.get('title')), 'brand': clean_text(item.get('brand')) or None,
+                'price_uzs': item.get('currentPrice'), 'pack': item.get('amount'), 'available': item.get('available'),
+                'max_quantity': _number(item.get('quantityLimit')),
+                'description': clean_text(item.get('description')) or None,
+                'nutrition_per_100g': per_100g or None,
+                'composition': clean_text(ingredients.get('description')) or None,
+                'details': details}
 
 
 def create_http():
@@ -202,46 +264,60 @@ async def select_country(country: str) -> dict:
                         'RU/KZ reads are anonymous; account, cart and checkout tools are UZ-only. Do not use them for this region.'))}
 
 
-@mcp.tool()
-@uz_only
-async def check_coordinates(country: str, longitude: float, latitude: float) -> dict:
-    """Read-only: validate longitude, latitude against a coarse Uzbekistan bounding box and return them for later search and cart calls. Does not select an address, verify delivery coverage or persist anything."""
-    if country != 'UZ':
-        raise ValueError('Unsupported country: check_coordinates is UZ-only')
+# The delivery address chosen with use_address; lives for this server process only.
+_delivery = None
+
+
+def _location(longitude=None, latitude=None):
+    """Explicit coordinates win; otherwise use the address chosen with use_address."""
+    if longitude is None and latitude is None:
+        if _delivery is None:
+            raise ValueError('No delivery address yet: call use_address (for example use_address("home")) or pass longitude and latitude')
+        return list(_delivery['location'])
     if (type(longitude) not in (int, float) or type(latitude) not in (int, float)
             or not (55 <= longitude <= 74 and 37 <= latitude <= 46)):
-        raise ValueError('Coordinates must be within the Uzbekistan bounding box')
-    return {'country': 'UZ', 'longitude': longitude, 'latitude': latitude,
-            'source': 'coordinates', 'coverage_verified': False, 'address_selected': False,
-            'note': 'Pass these coordinates to each location-dependent tool. Refresh search and cart after a location change; coverage and exact delivery address are not established.'}
+        raise ValueError('Pass both longitude and latitude inside Uzbekistan')
+    return [longitude, latitude]
+
+
+def _address_summary(entry, index):
+    address = entry['address']
+    return {'index': index, 'label': address.get('label') or None,
+            'short_address': address.get('shortAddress') or address.get('fullAddress')}
 
 
 @mcp.tool()
 @uz_only
-async def get_saved_address_coordinates(country: str, saved_address_index: int | None = None) -> dict:
-    """Read-only: return the coordinates of one saved address; saved_address_index is required when more than one exists, otherwise the result says ambiguous or none. Coordinates are private and this does not select the address for checkout."""
-    if country != 'UZ':
-        raise ValueError('Unsupported country: saved-address detection is UZ-only')
+async def use_address(address: str) -> dict:
+    """Choose the delivery address for this session by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. Search, cart and ordering then use it without coordinates."""
+    global _delivery
     from better_lavka_mcp.orders.submit import addresses
+    if not isinstance(address, str) or not address.strip():
+        raise ValueError('Name the saved address, for example "home"')
     async with create_http() as http:
         _, entries = await addresses(http)
-    if saved_address_index is None:
-        if len(entries) != 1:
-            return {'country': 'UZ', 'source': 'ambiguous' if entries else 'none',
-                    'count': len(entries), 'coverage_verified': False, 'address_selected': False,
-                    'note': 'No location inferred. Use list_saved_addresses and explicitly select an index, or supply coordinates.'}
-        index, source = 0, 'single_saved_address'
-    else:
-        if type(saved_address_index) is not int or not 0 <= saved_address_index < len(entries):
-            raise ValueError('Select a valid saved address index')
-        index, source = saved_address_index, 'saved_address_index'
-    loc = entries[index]['address'].get('location')
-    if not isinstance(loc, list) or len(loc) != 2:
-        raise ValueError('Saved address has no usable location')
-    result = await check_coordinates(country, loc[0], loc[1])
-    result['source'] = source
-    result['note'] += ' Favorite coordinates are a candidate, not evidence of the selected checkout address. Indexes can change; recheck the exact saved address.'
-    return result
+    query = address.strip().casefold()
+    aliases = {'home': ('дом', 'uy'), 'дом': ('home', 'uy'), 'uy': ('home', 'дом'),
+               'work': ('работа', 'ish'), 'работа': ('work', 'ish'), 'ish': ('work', 'работа')}
+    wanted = (query,) + aliases.get(query, ())
+    labels = [(entry['address'].get('label') or '').strip().casefold() for entry in entries]
+    matches = [i for i, label in enumerate(labels) if label in wanted]
+    if not matches:
+        matches = [i for i, entry in enumerate(entries)
+                   if any(query in str(entry['address'].get(k) or '').casefold() for k in ('label', 'shortAddress', 'fullAddress'))]
+    if not matches and query.isdigit() and int(query) < len(entries):
+        matches = [int(query)]
+    if len(matches) != 1:
+        return {'selected': False,
+                'reason': 'ambiguous' if matches else 'not_found',
+                'candidates': [_address_summary(entries[i], i) for i in (matches or range(len(entries)))],
+                'note': 'Ask which one and call use_address again with its name or index.'}
+    index = matches[0]
+    location = entries[index]['address'].get('location')
+    if not isinstance(location, list) or len(location) != 2:
+        raise ValueError('This saved address has no map point; choose another one')
+    _delivery = {'address_id': entries[index].get('addressId'), 'location': location, **_address_summary(entries[index], index)}
+    return {'selected': True, **_address_summary(entries[index], index)}
 
 
 @mcp.tool()
@@ -262,7 +338,7 @@ async def get_storefront_status(country: str | None = None) -> dict:
 
 @mcp.tool()
 async def search_products(query: str, limit: int = 20, longitude: float | None = None, latitude: float | None = None, country: str | None = None) -> dict:
-    """Read-only: search products at longitude, latitude (UZ session) or an isolated anonymous RU/KZ storefront; limit is 1–50. Prices and availability are location-dependent and do not establish delivery coverage."""
+    """Find products and prices. In Uzbekistan it searches at the address chosen with use_address (or at longitude, latitude); RU and KZ need coordinates and search anonymously. limit is 1–50."""
     if (longitude is None) != (latitude is None):
         raise ValueError("Both longitude and latitude are required")
     country = _selected_region if country is None else country
@@ -274,8 +350,9 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
         from better_lavka_mcp.region import RegionalStorefront
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).search(query, limit, longitude, latitude)
+    location = _location(longitude, latitude)
     async with create_http() as http:
-        return await Lavka(http).search(query, limit, None if longitude is None else (longitude, latitude))
+        return await Lavka(http).search(query, limit, tuple(location))
 
 @mcp.tool()
 @uz_only
@@ -294,19 +371,18 @@ async def count_saved_addresses() -> dict:
     async with create_http() as http:
         return await Lavka(http).saved_address_count()
 
-async def _cart_client(http, longitude, latitude):
+async def _cart_client(http, location):
     from better_lavka_mcp.cart import CartClient
     client = Lavka(http)
     props = await client.bootstrap()
-    if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
-        raise UpstreamError('An authenticated Uzbekistan session is required')
+    client._require_login(props)
     info = props.get('pageData', {}).get('serviceInfo', {})
     if not info:
         async with httpx.AsyncClient(timeout=25, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as anonymous:
             info = (await Lavka(anonymous).bootstrap()).get('pageData', {}).get('serviceInfo', {})
     if info.get('currency') != 'UZS' or not info.get('currencySign'):
         raise UpstreamError('Uzbekistan currency and sign not confirmed by upstream')
-    return CartClient(http, props, [longitude, latitude], info['currencySign'])
+    return client, CartClient(http, props, location, info['currencySign'])
 
 
 def _cart_view(cart):
@@ -314,49 +390,177 @@ def _cart_view(cart):
     for item in cart['items']:
         if not isinstance(item, dict):
             raise UpstreamError('Unexpected cart item')
-        items.append({k: item.get(k) for k in ('id', 'title', 'quantity', 'price')})
+        items.append({'id': item.get('id'), 'title': clean_text(item.get('title')), 'quantity': item.get('quantity'),
+                      'price_uzs': item.get('price'), 'pack': item.get('amount'),
+                      'available': item.get('isUnavailableOnDepot') is not True})
+    conditions = cart.get('orderConditions') if isinstance(cart.get('orderConditions'), dict) else {}
     return {'items': items, 'currency': 'UZS',
             'total_uzs': cart.get('totalPriceValue'),
+            'delivery_uzs': conditions.get('deliveryCost'),
+            'eta': conditions.get('eta'),
             'available_for_checkout': cart.get('availableForCheckout'),
-            'checkout_unavailable_reason': cart.get('checkoutUnavailableReason'),
-            'note': 'Point-in-time cart at supplied coordinates; address and payment selection are not established.'}
+            'checkout_unavailable_reason': cart.get('checkoutUnavailableReason')}
+
+
+def _quantity(value):
+    try:
+        return int(Decimal(str(value)))
+    except (InvalidOperation, ValueError):
+        return 0
+
+
+async def _add_products(client, wanted, titles):
+    """Add quantities on top of the cart, then drop what the store cannot sell and cap at its limits."""
+    cart = await client.retrieve()
+    current = {item['id']: _quantity(item.get('quantity')) for item in cart['items'] if isinstance(item, dict) and item.get('id')}
+    targets = {pid: min(current.get(pid, 0) + qty, 50) for pid, qty in wanted.items()}
+    fresh = await client.set_items(targets)
+    by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
+    fixes, unavailable, limited = {}, [], []
+    for pid, target in targets.items():
+        item = by_id.get(pid, {})
+        title = clean_text(item.get('title')) or titles.get(pid) or pid
+        limit = _number(item.get('quantityLimit'))
+        if item.get('isUnavailableOnDepot') is True or limit == 0:
+            fixes[pid] = 0
+            unavailable.append(title)
+        elif limit is not None and target > limit:
+            fixes[pid] = int(limit)
+            limited.append({'title': title, 'requested': target, 'max': int(limit)})
+    if fixes:
+        fresh = await client.set_items(fixes)
+    added = [{'product_id': pid, 'title': clean_text(by_id.get(pid, {}).get('title')) or titles.get(pid),
+              'quantity': fixes.get(pid, target)} for pid, target in targets.items() if fixes.get(pid, target)]
+    return {'added': added, 'unavailable': unavailable, 'limited': limited, 'cart': _cart_view(fresh)}
 
 
 @mcp.tool()
 @uz_only
-async def get_cart(longitude: float, latitude: float) -> dict:
-    """Read-only: return the cart at longitude, latitude (items, quantities, prices, total UZS, checkout availability). Does not select a delivery address or payment card."""
+async def get_cart(longitude: float | None = None, latitude: float | None = None) -> dict:
+    """What's in the cart: items, quantities, prices, delivery cost, ETA and total in UZS, for the address chosen with use_address (or at longitude, latitude)."""
+    location = _location(longitude, latitude)
     async with create_http() as http:
-        client = await _cart_client(http, longitude, latitude)
+        _, client = await _cart_client(http, location)
         return _cart_view(await client.retrieve())
 
 
 @mcp.tool()
 @uz_only
-async def set_cart_quantity(longitude: float, latitude: float, product_id: str, quantity: int, price_uzs: str) -> dict:
-    """Modifies the real cart: set product_id to an absolute integer quantity (0 removes it) at longitude, latitude, passing price_uzs from the current search. Sent once with a cart readback check; never retried automatically."""
+async def set_cart_quantity(product_id: str, quantity: int, longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Change the cart: set product_id to an exact quantity (0 removes it). Lavka applies its current price. Returns the updated cart."""
+    location = _location(longitude, latitude)
     async with create_http() as http:
-        client = await _cart_client(http, longitude, latitude)
-        return _cart_view(await client.set_item(product_id, quantity, price_uzs))
+        _, client = await _cart_client(http, location)
+        return _cart_view(await client.set_items({product_id: quantity}))
+
+
+class CartRequest(TypedDict, total=False):
+    query: str
+    product_id: str
+    quantity: int
 
 
 @mcp.tool()
 @uz_only
-async def list_saved_cards(longitude: float, latitude: float) -> dict:
-    """Read-only: list saved cards as masked suffixes such as "**** 1234" at longitude, latitude (the payment API requires coordinates). Does not select a card or charge anything."""
+async def add_to_cart(items: list[CartRequest], longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1); a query adds the first available search result. Reports what was added, not found, unavailable or capped at the store limit."""
+    if not isinstance(items, list) or not items or len(items) > 50:
+        raise ValueError('Pass 1–50 items')
+    location = _location(longitude, latitude)
+    wanted, titles, not_found = {}, {}, []
+    async with create_http() as http:
+        lavka, client = await _cart_client(http, location)
+        for request in items:
+            request = dict(request)
+            quantity = request.get('quantity', 1)
+            if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 50:
+                raise ValueError('Each quantity must be between 1 and 50')
+            product_id = request.get('product_id')
+            if not product_id:
+                query = request.get('query')
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError('Each item needs a query or a product_id')
+                found = await lavka.search(query, 5, tuple(location))
+                match = next((p for p in found['products'] if p.get('available') and p.get('id')), None)
+                if match is None:
+                    not_found.append(query)
+                    continue
+                product_id, titles[match['id']] = match['id'], match['title']
+            wanted[product_id] = wanted.get(product_id, 0) + quantity
+        if not wanted:
+            return {'added': [], 'not_found': not_found, 'unavailable': [], 'limited': [], 'cart': _cart_view(await client.retrieve())}
+        result = await _add_products(client, wanted, titles)
+    return {**result, 'not_found': not_found}
+
+
+@mcp.tool()
+@uz_only
+async def repeat_order(order_id: str = 'last', longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Put everything from a past order back into the cart (order_id from list_order_history, or "last"). Lavka applies today's prices; items the store no longer has are left out and listed."""
+    location = _location(longitude, latitude)
+    async with create_http() as http:
+        lavka, client = await _cart_client(http, location)
+        if order_id == 'last':
+            history = await lavka.order_history(1)
+            if not history['orders']:
+                raise ValueError('There are no past orders yet')
+            order_id = history['orders'][0]['order_id']
+        order = await lavka.order(order_id)
+        wanted, titles = {}, {}
+        for line in order['items']:
+            wanted[line['product_id']] = wanted.get(line['product_id'], 0) + max(_quantity(line.get('quantity')), 1)
+            titles[line['product_id']] = line['name']
+        if not wanted:
+            raise ValueError('That order has no products to repeat')
+        result = await _add_products(client, wanted, titles)
+    return {'order': {k: order[k] for k in ('order_id', 'created_at', 'total_uzs')}, **result}
+
+
+@mcp.tool()
+@uz_only
+async def get_product(product_id: str, longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Product card: price, pack size, availability, description, calories and protein/fat/carbs per 100 g, shelf life, brand and country."""
+    location = _location(longitude, latitude)
+    async with create_http() as http:
+        return await Lavka(http).product(product_id, location)
+
+
+@mcp.tool()
+@uz_only
+async def list_saved_cards(longitude: float | None = None, latitude: float | None = None) -> dict:
+    """Your saved cards as "**** 1234", for the address chosen with use_address (or at longitude, latitude)."""
     from better_lavka_mcp.payment import PaymentClient
+    location = _location(longitude, latitude)
     async with create_http() as http:
         props = await Lavka(http).bootstrap()
-        cards = await PaymentClient(http, props, [longitude, latitude]).lookup()
-        return {'cards': cards.masked_cards, 'payment_selected': False}
+        cards = await PaymentClient(http, props, location).lookup()
+        return {'cards': cards.masked_cards}
 
 
 @mcp.tool()
 @uz_only
 async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
-    """Read-only: list up to 21 past orders (ID, timestamps, status), optionally before a timezone-aware older_than timestamp. Pagination may miss orders that share the last timestamp."""
+    """Past orders, newest first, with their items, total and address. For the next page pass next_older_than as older_than. limit is 1–21."""
     async with create_http() as http:
         return await Lavka(http).order_history(limit, older_than)
+
+
+@mcp.tool()
+@uz_only
+async def get_order(order_id: str) -> dict:
+    """One past order in full: items, products, delivery, service fee, discount, total, address and status."""
+    async with create_http() as http:
+        return await Lavka(http).order(order_id)
+
+
+@mcp.tool()
+@uz_only
+async def get_payment_status(order_id: str) -> dict:
+    """Payment status of an order (success, wait_user_action, failed…). When the bank asks for 3-D Secure it also returns redirect_url to open."""
+    from better_lavka_mcp.payment import payment_status
+    async with create_http() as http:
+        props = await Lavka(http).bootstrap()
+        return await payment_status(http, props, order_id)
 
 
 @mcp.tool()
@@ -389,7 +593,7 @@ async def list_active_orders() -> dict:
 @mcp.tool()
 @uz_only
 async def list_saved_addresses() -> dict:
-    """Read-only: list saved addresses with the index needed by get_saved_address_coordinates and preview_order. Contains private address details."""
+    """Your saved delivery addresses with their index and name. Pick one for the session with use_address."""
     from better_lavka_mcp.orders.submit import addresses
     async with create_http() as http:
         _, entries = await addresses(http)
@@ -398,17 +602,34 @@ async def list_saved_addresses() -> dict:
 
 @mcp.tool()
 @uz_only
-async def preview_order(saved_address_index: int, card_last4: str) -> dict:
-    """Creates a single-use five-minute local preview token for saved_address_index and card_last4, returning address, items, total UZS and masked card. Places no order and charges nothing, but records a local preview row; the cart must be available and non-rover."""
-    from better_lavka_mcp.orders.submit import preview
+async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
+    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to your only saved card. Charges nothing."""
+    from better_lavka_mcp.orders.submit import addresses, preview
+    from better_lavka_mcp.payment import PaymentClient
     async with create_http() as http:
+        if saved_address_index is None or card_last4 is None:
+            _, entries = await addresses(http)
+            if saved_address_index is None:
+                if _delivery is None:
+                    raise ValueError('Choose the delivery address first with use_address, or pass saved_address_index')
+                ids = [i for i, entry in enumerate(entries) if entry.get('addressId') == _delivery['address_id']]
+                if len(ids) != 1:
+                    raise ValueError('The address chosen with use_address is gone; call use_address again')
+                saved_address_index = ids[0]
+            if card_last4 is None:
+                location = entries[saved_address_index]['address'].get('location') if 0 <= saved_address_index < len(entries) else None
+                props = await Lavka(http).bootstrap()
+                cards = (await PaymentClient(http, props, location).lookup()).masked_cards
+                if len(cards) != 1:
+                    return {'preview': False, 'cards': cards, 'note': 'Ask which card to use and pass card_last4.'}
+                card_last4 = cards[0][-4:]
         return await preview(http, saved_address_index, card_last4)
 
 
 @mcp.tool()
 @uz_only
 async def submit_order(order_preview_token: str, confirmed_total_uzs: str, explicit_confirmation: bool) -> dict:
-    """Charges money: place one order from an unexpired order_preview_token after explicit_confirmation=true and confirmed_total_uzs exactly matching the preview total. Sent at most once; the result can be submitted, rejected or unknown, and payment is never verified."""
+    """Charges money: place the order from preview_order's token. Pass the exact total from the preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure."""
     from better_lavka_mcp.orders.submit import submit
     async with create_http() as http:
         return await submit(http, order_preview_token, confirmed_total_uzs, explicit_confirmation)

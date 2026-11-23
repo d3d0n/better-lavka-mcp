@@ -84,6 +84,6 @@ To use a non-default session file, add `YANDEX_SESSION_FILE` with an absolute, p
 1. Restart or reconnect the client and inspect its MCP server/tool list. A connection alone does not verify live API access.
 2. Ask it to call `get_storefront_status`. This is a homepage status, not a coverage check for your address; network or upstream changes can still cause an error.
 3. For account tools, request `start_login` in a private channel and complete the [QR flow](auth.md). A client may not render images; the tool also returns a link. Treat both as credentials.
-4. Search with both longitude and latitude if needed. Coordinate order is longitude first, latitude second. Do not treat suggestions or coordinates as selection of a saved delivery address.
+4. Ask it to `use_address` with the name of a saved address ("Дом", "Work"); search, cart and ordering then need no coordinates. Without it, pass longitude first, latitude second.
 
 If the server fails to start, check the absolute console script path, virtualenv dependencies, and the client's stderr/logs. Never paste raw logs containing QR links, cookies or account information into an issue. Client-specific rendering and live connectivity are not guaranteed by a successful local test.

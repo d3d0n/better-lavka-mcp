@@ -1,22 +1,53 @@
+import json
+
 import httpx
 import pytest
 from better_lavka_mcp.server import Lavka
 
+# Synthetic order-log entry shaped like a live lavka.yandex.uz response (2026-11).
+ORDER = {
+    'orderId': 'order-2', 'shortOrderId': '000000-111', 'createdAt': '2026-01-02T10:00:00+00:00',
+    'closedAt': '2026-01-02T10:30:00+00:00', 'status': 'closed', 'statusText': 'Доставлен',
+    'calculation': {'finalCost': '50000', 'deliveryCost': '10', 'serviceFeeV2': '3990', 'discount': '1000', 'currencyCode': 'UZS',
+                    'items': [{'name': 'Тво\xadрог <notr>Example</notr>', 'count': 2, 'cost': '18000', 'productId': 'prod-a', 'positionId': 'pos-a'},
+                              {'name': 'Хлеб', 'count': 1, 'cost': '4000', 'productId': 'prod-b', 'positionId': 'pos-b'}]},
+    'productsPrice': '40000',
+    'destinations': [{'shortText': 'Example street, 1', 'point': [69.0, 41.0]}],
+    'contact': {'phone': 'secret-phone'}, 'yandexUid': 'secret-uid', 'receipts': [{'url': 'secret-receipt'}],
+}
+
+
 @pytest.mark.asyncio
-async def test_history_uses_authenticated_identity_and_returns_only_safe_fields():
+async def test_history_lists_items_pages_by_order_id_and_hides_contact_data():
     seen = []
     async def handler(request):
-        import json
         seen.append(json.loads(request.content))
-        return httpx.Response(200, json={'orders': [{'orderId':'order-1', 'shortOrderId':'1', 'createdAt':'2026-01-01T00:00:00Z', 'status':'canceled', 'statusText':'Canceled', 'contact':{'phone':'secret'}, 'yandexUid':'123'}], 'tabs':{'deliveryOrders':['order-1']}})
+        return httpx.Response(200, json={'orders': [ORDER], 'tabs': {}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        http.cookies.set('yandexuid', '123', domain='.yandex.uz', path='/')
         client = Lavka(http)
         client.props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
-        result = await client.order_history(count=21, older_than='2026-02-01T00:00:00Z')
-    assert seen == [{'range': {'count':21, 'olderThan':'2026-02-01T00:00:00Z'}, 'userIdentity':{'yandexUid':'123','boundYandexUids':[]}, 'includeServiceMetadata':False}]
-    assert result['orders'] == [{'order_id':'order-1', 'short_order_id':'1', 'created_at':'2026-01-01T00:00:00Z', 'status':'canceled', 'status_text':'Canceled', 'closed_at':None}]
-    assert 'secret' not in str(result) and '123' not in str(result)
+        result = await client.order_history(count=1, older_than='order-1')
+    assert seen == [{'range': {'count': 1, 'olderThan': 'order-1'}, 'includeServiceMetadata': False}]
+    order = result['orders'][0]
+    assert order['total_uzs'] == '50000' and order['address'] == 'Example street, 1'
+    assert order['items'] == [{'product_id': 'prod-a', 'name': 'Творог Example', 'quantity': 2, 'price_uzs': '18000'},
+                              {'product_id': 'prod-b', 'name': 'Хлеб', 'quantity': 1, 'price_uzs': '4000'}]
+    assert result['next_older_than'] == 'order-2'
+    assert 'secret' not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_get_order_reads_one_order_with_fees():
+    async def handler(request):
+        assert json.loads(request.content)['range'] == {'orderId': 'order-2'}
+        return httpx.Response(200, json={'orders': [ORDER]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = Lavka(http)
+        client.props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
+        order = await client.order('order-2')
+    assert (order['products_uzs'], order['delivery_uzs'], order['service_fee_uzs'], order['discount_uzs']) == ('40000', '10', '3990', '1000')
+    assert 'secret' not in json.dumps(order)
+
 
 @pytest.mark.asyncio
 async def test_mcp_history_tool_delegates_to_authenticated_client(monkeypatch):
@@ -27,18 +58,6 @@ async def test_mcp_history_tool_delegates_to_authenticated_client(monkeypatch):
     result = await server.list_order_history(5, None)
     assert result == {"orders": [], "count": 5, "cursor": None}
 
-@pytest.mark.asyncio
-async def test_history_rejects_ambiguous_uid_without_request():
-    from better_lavka_mcp.server import UpstreamError
-    async def handler(request):
-        pytest.fail("unexpected network request")
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        http.cookies.set("yandexuid", "123", domain=".yandex.uz", path="/")
-        http.cookies.set("yandexuid", "456", domain="yandex.uz", path="/")
-        client = Lavka(http)
-        client.props = {"pageData": {"passportInfo": {"status": "VALID"}}}
-        with pytest.raises(UpstreamError, match="identity"):
-            await client.order_history()
 
 @pytest.mark.asyncio
 async def test_cancel_route_is_not_allowlisted_even_with_mock_transport():
