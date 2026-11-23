@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.d3d0n/better-lavka-mcp",
+  "title": "Better Lavka",
+  "description": "Order groceries from Yandex Lavka Uzbekistan: search, shopping lists, repeat orders.",
+  "repository": {
+    "url": "https://github.com/d3d0n/better-lavka-mcp",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "better-lavka-mcp",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

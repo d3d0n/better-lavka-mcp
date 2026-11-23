@@ -4,9 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "better-lavka-mcp"
-version = "0.1.0"
-description = "MCP server for Yandex Lavka Uzbekistan"
+version = "0.2.0"
+description = "MCP server for ordering groceries from Yandex Lavka Uzbekistan with an AI assistant"
+readme = "README.md"
 license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+keywords = ["mcp", "model-context-protocol", "yandex", "lavka", "uzbekistan", "groceries"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+  "Topic :: Utilities",
+]
 requires-python = ">=3.12"
 dependencies = [
   "mcp>=1.9,<2",
@@ -16,6 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2"]
+
+[project.urls]
+Homepage = "https://github.com/d3d0n/better-lavka-mcp"
+Source = "https://github.com/d3d0n/better-lavka-mcp"
+Issues = "https://github.com/d3d0n/better-lavka-mcp/issues"
 
 [project.scripts]
 better-lavka-mcp = "better_lavka_mcp.server:main"

@@ -7,6 +7,7 @@
 !/CONTRIBUTING.md
 !/SECURITY.md
 !/mise.toml
+!/server.json
 !/uv.lock
 !/docs/
 /docs/*
@@ -17,6 +18,7 @@
 /.github/*
 !/.github/workflows/
 /.github/workflows/*
+!/.github/workflows/publish.yml
 !/.github/workflows/ci.yml
 !/pyproject.toml
 !/requirements.txt

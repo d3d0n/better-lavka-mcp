@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.d3d0n/better-lavka-mcp -->
 <h1 align="center">Better Lavka MCP 🛒</h1>
 
 <p align="center">
