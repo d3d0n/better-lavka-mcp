@@ -13,14 +13,26 @@ STATE_DIR = Path.home() / '.local/share/yandex-lavka-mcp'
 
 
 def targets():
-    """Files and folders the server keeps, existing ones only."""
-    found = [STATE_DIR] if STATE_DIR.exists() else []
+    """Files and folders the server keeps, existing ones only.
+
+    Only the server's own data folder is ever removed recursively. A custom YANDEX_SESSION_FILE is
+    removed only when it is a file or a symlink (the link itself, never what it points to)."""
+    found = [STATE_DIR] if STATE_DIR.is_symlink() or STATE_DIR.exists() else []
     session = os.environ.get('YANDEX_SESSION_FILE')
     if session:
         path = Path(session).expanduser()
-        if path.exists() and STATE_DIR not in path.parents:
+        if (path.is_symlink() or path.is_file()) and STATE_DIR not in path.parents:
             found.append(path)
+        elif path.exists() and not path.is_file():
+            print(f'Skipping YANDEX_SESSION_FILE={path}: it is not a file.')
     return found
+
+
+def _delete(path):
+    if path == STATE_DIR and path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def run(argv):
@@ -40,7 +52,7 @@ def run(argv):
                 print('Nothing deleted.')
                 return 1
         for path in found:
-            shutil.rmtree(path) if path.is_dir() else path.unlink()
+            _delete(path)
         print('Deleted.')
     print('\nTo remove the program as well:')
     print('  claude mcp remove lavka          # or delete the "lavka" entry from your MCP client config')
