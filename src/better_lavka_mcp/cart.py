@@ -1,5 +1,7 @@
 """Uzbekistan cart access: read the cart and set absolute item quantities."""
+import asyncio
 import uuid
+import weakref
 from decimal import Decimal, InvalidOperation
 
 from better_lavka_mcp.constants import BASE
@@ -8,6 +10,17 @@ from better_lavka_mcp.errors import UpstreamError
 # Lavka rejects an empty line price but reprices every line to the current
 # catalog price (verified live on lavka.yandex.uz for new and existing items).
 PLACEHOLDER_PRICE = '1'
+
+# One cart write at a time per event loop: read, update and read-back must not interleave.
+_write_locks = weakref.WeakKeyDictionary()
+
+
+def _write_lock():
+    loop = asyncio.get_running_loop()
+    lock = _write_locks.get(loop)
+    if lock is None:
+        lock = _write_locks[loop] = asyncio.Lock()
+    return lock
 
 
 class CartClient:
@@ -47,18 +60,24 @@ class CartClient:
             raise UpstreamError('Unexpected cart response')
         return cart
 
-    async def set_items(self, quantities):
+    async def set_items(self, quantities, add=False):
         """Set absolute quantities for several products in one update; 0 removes.
 
+        With add=True the numbers are added to what the cart holds, computed from
+        the same snapshot whose cartVersion is sent (capped at 50).
         Lavka requires a non-empty price per line but reprices every line itself,
         so the current cart price is reused and new products get a placeholder.
         """
         if not isinstance(quantities, dict) or not quantities:
             raise ValueError('At least one product is required')
+        lowest = 1 if add else 0
         for product_id, quantity in quantities.items():
-            if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not 0 <= quantity <= 50:
-                raise ValueError('Each product needs an id and a quantity between 0 and 50')
+            if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not lowest <= quantity <= 50:
+                raise ValueError(f'Each product needs an id and a quantity between {lowest} and 50')
+        async with _write_lock():
+            return await self._write(quantities, add)
 
+    async def _write(self, quantities, add):
         def counts(items):
             result = {}
             for item in items:
@@ -75,6 +94,8 @@ class CartClient:
 
         cart = await self.retrieve()
         before = counts(cart['items'])
+        if add:
+            quantities = {pid: min(int(before.get(pid, 0)) + qty, 50) for pid, qty in quantities.items()}
         prices = {item['id']: str(item.get('price') or '') for item in cart['items']}
         lines = [{'id': product_id, 'quantity': str(quantity), 'pricePerCount': '1', 'quantityType': 'unit',
                   'price': prices.get(product_id) or PLACEHOLDER_PRICE, 'title': '', 'currency': 'UZS'}

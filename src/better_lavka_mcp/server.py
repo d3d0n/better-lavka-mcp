@@ -301,12 +301,13 @@ async def use_address(address: str) -> dict:
                'work': ('работа', 'ish'), 'работа': ('work', 'ish'), 'ish': ('work', 'работа')}
     wanted = (query,) + aliases.get(query, ())
     labels = [(entry['address'].get('label') or '').strip().casefold() for entry in entries]
-    matches = [i for i, label in enumerate(labels) if label in wanted]
+    if query.isdigit() and int(query) < len(entries):
+        matches = [int(query)]
+    else:
+        matches = [i for i, label in enumerate(labels) if label in wanted]
     if not matches:
         matches = [i for i, entry in enumerate(entries)
                    if any(query in str(entry['address'].get(k) or '').casefold() for k in ('label', 'shortAddress', 'fullAddress'))]
-    if not matches and query.isdigit() and int(query) < len(entries):
-        matches = [int(query)]
     if len(matches) != 1:
         return {'selected': False,
                 'reason': 'ambiguous' if matches else 'not_found',
@@ -411,11 +412,9 @@ def _quantity(value):
 
 async def _add_products(client, wanted, titles):
     """Add quantities on top of the cart, then drop what the store cannot sell and cap at its limits."""
-    cart = await client.retrieve()
-    current = {item['id']: _quantity(item.get('quantity')) for item in cart['items'] if isinstance(item, dict) and item.get('id')}
-    targets = {pid: min(current.get(pid, 0) + qty, 50) for pid, qty in wanted.items()}
-    fresh = await client.set_items(targets)
+    fresh = await client.set_items({pid: min(qty, 50) for pid, qty in wanted.items()}, add=True)
     by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
+    targets = {pid: _quantity(by_id.get(pid, {}).get('quantity')) for pid in wanted}
     fixes, unavailable, limited = {}, [], []
     for pid, target in targets.items():
         item = by_id.get(pid, {})

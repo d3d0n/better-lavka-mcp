@@ -26,6 +26,8 @@ async def test_use_address_matches_name_alias_street_or_index(saved):
     assert (await server.use_address('работа'))['index'] == 1
     assert (await server.use_address('avenue, 9'))['index'] == 2
     assert (await server.use_address('0'))['label'] == 'Дом'
+    # "1" is an index, not the house number in "Example street, 1".
+    assert (await server.use_address('1'))['label'] == 'Работа'
     assert 'private' not in str(await server.use_address('дом'))
 
 

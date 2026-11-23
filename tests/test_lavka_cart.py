@@ -39,6 +39,47 @@ async def test_set_items_sends_one_update_and_lets_lavka_price_lines():
 
 
 @pytest.mark.asyncio
+async def test_add_counts_from_the_snapshot_whose_version_is_sent():
+    from better_lavka_mcp.cart import CartClient
+    retrieves, updates = [], []
+    def handle(request):
+        body = json.loads(request.content)
+        if request.url.path.endswith('/update'):
+            updates.append(body)
+            return httpx.Response(200, json={})
+        retrieves.append(1)
+        # Another writer bumps the cart between reads: v1 has 1 milk, v2 has 3.
+        if len(retrieves) == 1:
+            return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': 1, 'items': [{'id': 'milk', 'quantity': '1', 'price': '100'}]})
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': 2, 'items': [{'id': 'milk', 'quantity': '3', 'price': '100'}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CartClient(http, {'pageData': {'passportInfo': {'status': 'VALID'}}}, [65.0, 40.0], 'сум')
+        await client.set_items({'milk': 2}, add=True)
+    assert len(updates) == 1 and len(retrieves) == 2
+    assert (updates[0]['cartVersion'], updates[0]['items'][0]['quantity']) == (1, '3')
+
+
+@pytest.mark.asyncio
+async def test_concurrent_adds_do_not_overwrite_each_other():
+    import asyncio
+    from better_lavka_mcp.cart import CartClient
+    cart = {'version': 1, 'milk': 0}
+    async def handle(request):
+        await asyncio.sleep(0)
+        if request.url.path.endswith('/update'):
+            body = json.loads(request.content)
+            assert body['cartVersion'] == cart['version']
+            cart['milk'], cart['version'] = int(body['items'][0]['quantity']), cart['version'] + 1
+            return httpx.Response(200, json={})
+        items = [{'id': 'milk', 'quantity': str(cart['milk']), 'price': '100'}] if cart['milk'] else []
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': cart['version'], 'items': items})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CartClient(http, {'pageData': {'passportInfo': {'status': 'VALID'}}}, [65.0, 40.0], 'сум')
+        await asyncio.gather(client.set_items({'milk': 1}, add=True), client.set_items({'milk': 2}, add=True))
+    assert cart['milk'] == 3
+
+
+@pytest.mark.asyncio
 async def test_unverified_readback_fails_closed():
     from better_lavka_mcp.cart import CartClient
     from better_lavka_mcp.server import UpstreamError
