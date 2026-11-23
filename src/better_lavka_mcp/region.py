@@ -9,7 +9,7 @@ import math
 import re
 import time
 
-from lavka_errors import UpstreamError
+from better_lavka_mcp.errors import UpstreamError
 
 REGIONS = {
     'RU': ('ru', 'RUB'),

@@ -1,7 +1,7 @@
 import asyncio
 import httpx
 import pytest
-from lavka_cancel import cancel_order, CancellationBlocked
+from better_lavka_mcp.orders.cancel import cancel_order, CancellationBlocked
 
 
 def test_canceled_history_verifies_and_never_resubmits(tmp_path):

@@ -1,6 +1,6 @@
 import asyncio
 import httpx
-from lavka_live_transport import submit_once, AttemptGuard
+from better_lavka_mcp.orders.guard import submit_once, AttemptGuard
 
 
 def test_submit_rejection_is_sanitized_and_not_retried(tmp_path):

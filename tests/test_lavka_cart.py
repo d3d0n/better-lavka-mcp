@@ -4,7 +4,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_retrieve_requires_authenticated_session_and_returns_live_cart():
-    from lavka_cart import CartClient
+    from better_lavka_mcp.cart import CartClient
     async def handle(request):
         assert request.url.path == '/api/v1/providers/cart/v1/retrieve'
         assert json.loads(request.content)['position']['location'] == [65.0, 40.0]
@@ -16,7 +16,7 @@ async def test_retrieve_requires_authenticated_session_and_returns_live_cart():
 
 @pytest.mark.asyncio
 async def test_set_item_uses_uzs_and_readback_verifies_absolute_quantity():
-    from lavka_cart import CartClient
+    from better_lavka_mcp.cart import CartClient
     calls = []
     def handle(request):
         body = json.loads(request.content)
@@ -37,8 +37,8 @@ async def test_set_item_uses_uzs_and_readback_verifies_absolute_quantity():
 
 @pytest.mark.asyncio
 async def test_unverified_readback_fails_closed():
-    from lavka_cart import CartClient
-    from lavka_uz import UpstreamError
+    from better_lavka_mcp.cart import CartClient
+    from better_lavka_mcp.server import UpstreamError
     def handle(request):
         if request.url.path.endswith('/update'):
             return httpx.Response(200, json={'ok': True})
@@ -50,8 +50,8 @@ async def test_unverified_readback_fails_closed():
 
 
 def test_rejects_unauthenticated_and_ruble_context():
-    from lavka_cart import CartClient
-    from lavka_uz import UpstreamError
+    from better_lavka_mcp.cart import CartClient
+    from better_lavka_mcp.server import UpstreamError
     with pytest.raises(UpstreamError, match='authenticated'):
         CartClient(None, {'pageData': {'passportInfo': {'status': 'INVALID_PARAMS'}}}, [69, 41], 'сум')
     with pytest.raises(ValueError, match='currency'):

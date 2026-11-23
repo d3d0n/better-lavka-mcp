@@ -89,7 +89,7 @@ def register_qr_tools(mcp, session_path, guard=None):
     from http.cookiejar import Cookie
     import json
     import httpx
-    from qr_runtime import QRManager
+    from better_lavka_mcp.auth.runtime import QRManager
 
     if guard is None:
         guard = lambda fn: fn
@@ -102,7 +102,7 @@ def register_qr_tools(mcp, session_path, guard=None):
     manager = QRManager(session.parent / ('.qr-session-' + suffix), session.parent / ('.qr-image-' + suffix + '.png'))
 
     async def verify(path):
-        from lavka_uz import Lavka
+        from better_lavka_mcp.server import Lavka
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             data = json.loads(path.read_text())
             for item in data['cookies']:
@@ -116,11 +116,11 @@ def register_qr_tools(mcp, session_path, guard=None):
 
     @mcp.tool()
     @guard
-    async def login_start(replace_existing: bool = False):
-        """Start login and return a QR image plus its short-lived link. Share only with the intended user; client logs may contain the link. Set replace_existing only with approval."""
+    async def start_login(replace_existing_session: bool = False):
+        """Starts a pending QR login and returns a QR image plus a short-lived link; both are credentials, share only with the intended user. replace_existing_session=true replaces the current session and requires explicit approval."""
         from mcp.types import TextContent, ImageContent
         import base64
-        result = await login.start(replace_existing)
+        result = await login.start(replace_existing_session)
         image_path = result.pop('qr_image', None)
         content = [TextContent(type='text', text=json.dumps(result))]
         if image_path:
@@ -134,13 +134,13 @@ def register_qr_tools(mcp, session_path, guard=None):
 
     @mcp.tool()
     @guard
-    async def qr_login_status() -> dict:
-        """Poll QR login and verify Lavka session; never reveals credentials."""
+    async def get_login_status() -> dict:
+        """Read-only observation: poll the pending login, verify the Lavka session, and save it to the session file when valid; returns pending, authenticated, login_required, expired, session_changed, verification_failed, verification_unavailable or error. Never returns credentials."""
         return await login.status()
 
     @mcp.tool()
-    async def qr_login_cancel() -> dict:
-        """Cancel pending login and delete its QR image, regardless of selected region."""
+    async def cancel_login() -> dict:
+        """Cancels any pending QR login and deletes its QR image and staged session file, regardless of the selected country. Does not sign out an already authenticated session."""
         return await login.cancel()
 
     return login

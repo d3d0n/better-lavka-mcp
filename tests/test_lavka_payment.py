@@ -1,8 +1,8 @@
 import json
 import httpx
 import pytest
-from lavka_uz import UpstreamError
-from lavka_payment import PaymentClient
+from better_lavka_mcp.server import UpstreamError
+from better_lavka_mcp.payment import PaymentClient
 
 PROPS = {'pageData': {'passportInfo': {'status': 'VALID'}}}
 LOCATION = [69.2, 41.3]

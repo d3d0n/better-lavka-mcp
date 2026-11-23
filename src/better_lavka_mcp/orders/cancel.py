@@ -5,7 +5,7 @@ import re
 import sqlite3
 import stat
 
-from lavka_uz import BASE
+from better_lavka_mcp.constants import BASE
 
 
 class CancellationBlocked(RuntimeError):
@@ -58,7 +58,7 @@ async def cancel_order(*, http, props, order_id, confirmed, state_path, history)
     verified = await _canceled_in_history(history, order_id)
     result = {'cancellation_verified': verified, 'history_match': verified, 'outcome': 'canceled' if verified else 'unknown', 'refund_status': 'unknown', 'http_status': response.status_code}
     if 400 <= response.status_code <= 599:
-        from lavka_rejection_capture import sanitize_upstream_error
+        from better_lavka_mcp.orders.rejection import sanitize_upstream_error
         try:
             data = response.json()
         except ValueError:

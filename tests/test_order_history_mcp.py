@@ -1,6 +1,6 @@
 import httpx
 import pytest
-from lavka_uz import Lavka
+from better_lavka_mcp.server import Lavka
 
 @pytest.mark.asyncio
 async def test_history_uses_authenticated_identity_and_returns_only_safe_fields():
@@ -20,16 +20,16 @@ async def test_history_uses_authenticated_identity_and_returns_only_safe_fields(
 
 @pytest.mark.asyncio
 async def test_mcp_history_tool_delegates_to_authenticated_client(monkeypatch):
-    import lavka_uz
+    from better_lavka_mcp import server
     async def fake_history(self, count, older_than):
         return {"orders": [], "count": count, "cursor": older_than}
-    monkeypatch.setattr(lavka_uz.Lavka, "order_history", fake_history)
-    result = await lavka_uz.order_history(5, None)
+    monkeypatch.setattr(server.Lavka, "order_history", fake_history)
+    result = await server.list_order_history(5, None)
     assert result == {"orders": [], "count": 5, "cursor": None}
 
 @pytest.mark.asyncio
 async def test_history_rejects_ambiguous_uid_without_request():
-    from lavka_uz import UpstreamError
+    from better_lavka_mcp.server import UpstreamError
     async def handler(request):
         pytest.fail("unexpected network request")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:

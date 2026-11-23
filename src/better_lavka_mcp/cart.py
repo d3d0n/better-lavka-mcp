@@ -2,7 +2,8 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from lavka_uz import BASE, UpstreamError
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.errors import UpstreamError
 
 
 class CartClient:

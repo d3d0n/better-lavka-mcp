@@ -3,7 +3,7 @@ import os
 import stat
 import httpx
 import pytest
-from lavka_live_transport import AttemptGuard, submit_once
+from better_lavka_mcp.orders.guard import AttemptGuard, submit_once
 
 
 def test_full_response_written_privately_without_headers(tmp_path):

@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-import lavka_uz
+from better_lavka_mcp import server
 
 
 @pytest.mark.asyncio
@@ -11,34 +11,34 @@ async def test_selection_changes_default_status_and_explicit_override(monkeypatc
         async def status(self):
             seen.append(self.country)
             return {'country': self.country}
-    monkeypatch.setattr('regional_storefront.RegionalStorefront', Regional)
+    monkeypatch.setattr('better_lavka_mcp.region.RegionalStorefront', Regional)
     try:
-        await lavka_uz.select_region('RU')
-        assert (await lavka_uz.service_status())['country'] == 'RU'
-        assert (await lavka_uz.service_status('KZ'))['country'] == 'KZ'
-        assert (await lavka_uz.service_status())['country'] == 'RU'
+        await server.select_country('RU')
+        assert (await server.get_storefront_status())['country'] == 'RU'
+        assert (await server.get_storefront_status('KZ'))['country'] == 'KZ'
+        assert (await server.get_storefront_status())['country'] == 'RU'
     finally:
-        await lavka_uz.select_region('UZ')
+        await server.select_country('UZ')
     assert seen == ['RU', 'KZ', 'RU']
 
 
 @pytest.mark.asyncio
 async def test_all_uz_tools_refuse_selected_ru_and_kz(monkeypatch):
-    names = {t.name for t in await lavka_uz.mcp.list_tools()}
-    allowed = {'select_region', 'service_status', 'search_products'}
-    expected = {'delivery_location', 'detect_delivery_location', 'suggest_address', 'saved_address_count', 'get_cart', 'set_cart_item', 'saved_cards', 'order_history', 'active_orders', 'checkout_preview', 'saved_addresses', 'order_preview', 'submit_order', 'reconcile_checkout', 'cancel_order', 'login_start', 'qr_login_status', 'qr_login_cancel'}
+    names = {t.name for t in await server.mcp.list_tools()}
+    allowed = {'select_country', 'get_storefront_status', 'search_products'}
+    expected = {'check_coordinates', 'get_saved_address_coordinates', 'search_addresses', 'count_saved_addresses', 'get_cart', 'set_cart_quantity', 'list_saved_cards', 'list_order_history', 'list_active_orders', 'list_saved_addresses', 'preview_order', 'submit_order', 'reconcile_order_attempt', 'cancel_order', 'start_login', 'get_login_status', 'cancel_login'}
     assert names - allowed == expected
-    monkeypatch.setattr(lavka_uz, 'create_http', lambda: pytest.fail('must not touch UZ'))
+    monkeypatch.setattr(server, 'create_http', lambda: pytest.fail('must not touch UZ'))
     try:
         for region in ('RU', 'KZ'):
-            await lavka_uz.select_region(region)
-            for name in expected - {'qr_login_cancel'}:
-                tool = lavka_uz.mcp._tool_manager.get_tool(name)
+            await server.select_country(region)
+            for name in expected - {'cancel_login'}:
+                tool = server.mcp._tool_manager.get_tool(name)
                 # Call the registered wrapper directly, avoiding argument validation.
                 with pytest.raises(ValueError, match='UZ-only'):
                     await tool.fn()
     finally:
-        await lavka_uz.select_region('UZ')
+        await server.select_country('UZ')
 
 
 @pytest.mark.asyncio
@@ -50,21 +50,21 @@ async def test_region_cannot_change_during_uz_operation(monkeypatch):
             await release.wait()
             return self
         async def __aexit__(self, *args): pass
-    monkeypatch.setattr(lavka_uz, 'create_http', Client)
-    task = asyncio.create_task(lavka_uz.saved_address_count())
+    monkeypatch.setattr(server, 'create_http', Client)
+    task = asyncio.create_task(server.count_saved_addresses())
     await entered.wait()
     try:
         with pytest.raises(ValueError, match='in progress'):
-            await lavka_uz.select_region('RU')
+            await server.select_country('RU')
     finally:
         task.cancel()
         with pytest.raises(asyncio.CancelledError): await task
-    assert (await lavka_uz.select_region('UZ'))['country'] == 'UZ'
+    assert (await server.select_country('UZ'))['country'] == 'UZ'
 
 
 def test_startup_region_env_is_validated_and_process_scoped():
     import os, subprocess, sys
-    code = "import lavka_uz; print(lavka_uz._selected_region)"
+    code = "from better_lavka_mcp import server; print(server._selected_region)"
     def run(value):
         env = os.environ.copy()
         if value is None: env.pop('YANDEX_LAVKA_REGION', None)
@@ -83,11 +83,11 @@ async def test_search_uses_selection_and_override(monkeypatch):
         def __init__(self, country, http): self.country = country
         async def search(self, query, limit, longitude, latitude):
             return {'country': self.country}
-    monkeypatch.setattr('regional_storefront.RegionalStorefront', Regional)
+    monkeypatch.setattr('better_lavka_mcp.region.RegionalStorefront', Regional)
     try:
-        await lavka_uz.select_region('KZ')
-        assert (await lavka_uz.search_products('milk', longitude=1, latitude=1))['country'] == 'KZ'
-        assert (await lavka_uz.search_products('milk', longitude=1, latitude=1, country='RU'))['country'] == 'RU'
-        assert (await lavka_uz.search_products('milk', longitude=1, latitude=1))['country'] == 'KZ'
+        await server.select_country('KZ')
+        assert (await server.search_products('milk', longitude=1, latitude=1))['country'] == 'KZ'
+        assert (await server.search_products('milk', longitude=1, latitude=1, country='RU'))['country'] == 'RU'
+        assert (await server.search_products('milk', longitude=1, latitude=1))['country'] == 'KZ'
     finally:
-        await lavka_uz.select_region('UZ')
+        await server.select_country('UZ')

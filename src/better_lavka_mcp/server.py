@@ -9,9 +9,9 @@ from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
-from lavka_errors import UpstreamError
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.errors import UpstreamError
 
-BASE = "https://lavka.yandex.uz"
 STATE = os.path.expanduser(os.environ.get("YANDEX_SESSION_FILE", "~/.local/share/yandex-lavka-mcp/session.json"))
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -185,8 +185,8 @@ def uz_only(fn):
 mcp = FastMCP("Yandex Lavka Uzbekistan")
 
 @mcp.tool()
-async def select_region(country: str) -> dict:
-    """Select the region for this stdio server session; does not place orders."""
+async def select_country(country: str) -> dict:
+    """Set the default country for this server session to UZ, RU or KZ (in memory only; not saved). UZ enables account, cart and checkout tools; RU and KZ allow only search_products and get_storefront_status. Places no order."""
     global _selected_region
     if country not in ('UZ', 'RU', 'KZ'):
         raise ValueError('Unsupported country: supported countries are RU, KZ, UZ')
@@ -195,7 +195,7 @@ async def select_region(country: str) -> dict:
     _selected_region = country
     uz = country == 'UZ'
     return {'country': country, 'supported': True, 'persistent': False, 'session_scoped': True,
-            'read_only_tools': ['service_status', 'search_products'],
+            'read_only_tools': ['get_storefront_status', 'search_products'],
             'uz_account_and_checkout_tools_available': uz,
             'note': ('Selection lasts for this stdio session; status/search use it unless overridden. '
                      + ('UZ account, cart and checkout tools are available but not guaranteed to succeed.' if uz else
@@ -204,10 +204,10 @@ async def select_region(country: str) -> dict:
 
 @mcp.tool()
 @uz_only
-async def delivery_location(country: str, longitude: float, latitude: float) -> dict:
-    """Choose coordinates for subsequent calls; no account or server state is changed."""
+async def check_coordinates(country: str, longitude: float, latitude: float) -> dict:
+    """Read-only: validate longitude, latitude against a coarse Uzbekistan bounding box and return them for later search and cart calls. Does not select an address, verify delivery coverage or persist anything."""
     if country != 'UZ':
-        raise ValueError('Unsupported country: delivery_location is UZ-only')
+        raise ValueError('Unsupported country: check_coordinates is UZ-only')
     if (type(longitude) not in (int, float) or type(latitude) not in (int, float)
             or not (55 <= longitude <= 74 and 37 <= latitude <= 46)):
         raise ValueError('Coordinates must be within the Uzbekistan bounding box')
@@ -218,40 +218,40 @@ async def delivery_location(country: str, longitude: float, latitude: float) -> 
 
 @mcp.tool()
 @uz_only
-async def detect_delivery_location(country: str, address_index: int | None = None) -> dict:
-    """Use a single saved favorite or explicitly indexed favorite; coordinates are private."""
+async def get_saved_address_coordinates(country: str, saved_address_index: int | None = None) -> dict:
+    """Read-only: return the coordinates of one saved address; saved_address_index is required when more than one exists, otherwise the result says ambiguous or none. Coordinates are private and this does not select the address for checkout."""
     if country != 'UZ':
         raise ValueError('Unsupported country: saved-address detection is UZ-only')
-    from lavka_order_mcp import addresses
+    from better_lavka_mcp.orders.submit import addresses
     async with create_http() as http:
         _, entries = await addresses(http)
-    if address_index is None:
+    if saved_address_index is None:
         if len(entries) != 1:
             return {'country': 'UZ', 'source': 'ambiguous' if entries else 'none',
                     'count': len(entries), 'coverage_verified': False, 'address_selected': False,
-                    'note': 'No location inferred. Use saved_addresses and explicitly select an index, or supply coordinates.'}
+                    'note': 'No location inferred. Use list_saved_addresses and explicitly select an index, or supply coordinates.'}
         index, source = 0, 'single_saved_address'
     else:
-        if type(address_index) is not int or not 0 <= address_index < len(entries):
+        if type(saved_address_index) is not int or not 0 <= saved_address_index < len(entries):
             raise ValueError('Select a valid saved address index')
-        index, source = address_index, 'saved_address_index'
+        index, source = saved_address_index, 'saved_address_index'
     loc = entries[index]['address'].get('location')
     if not isinstance(loc, list) or len(loc) != 2:
         raise ValueError('Saved address has no usable location')
-    result = await delivery_location(country, loc[0], loc[1])
+    result = await check_coordinates(country, loc[0], loc[1])
     result['source'] = source
     result['note'] += ' Favorite coordinates are a candidate, not evidence of the selected checkout address. Indexes can change; recheck the exact saved address.'
     return result
 
 
 @mcp.tool()
-async def service_status(country: str | None = None) -> dict:
-    """Get homepage storefront status. Does not confirm a specific address."""
+async def get_storefront_status(country: str | None = None) -> dict:
+    """Read-only: return homepage storefront info (currency, open/disabled, delivery time; UZ also reports login status) for the selected country or an explicit country. Not a quote and not proof of delivery coverage at an address."""
     country = _selected_region if country is None else country
     if country not in ('UZ', 'RU', 'KZ'):
         raise ValueError('Supported countries: RU, KZ, UZ')
     if country != 'UZ':
-        from regional_storefront import RegionalStorefront
+        from better_lavka_mcp.region import RegionalStorefront
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).status()
     async with create_http() as http:
@@ -262,7 +262,7 @@ async def service_status(country: str | None = None) -> dict:
 
 @mcp.tool()
 async def search_products(query: str, limit: int = 20, longitude: float | None = None, latitude: float | None = None, country: str | None = None) -> dict:
-    """Search at supplied coordinates. RU/KZ use isolated anonymous storefronts; UZ uses the existing session."""
+    """Read-only: search products at longitude, latitude (UZ session) or an isolated anonymous RU/KZ storefront; limit is 1–50. Prices and availability are location-dependent and do not establish delivery coverage."""
     if (longitude is None) != (latitude is None):
         raise ValueError("Both longitude and latitude are required")
     country = _selected_region if country is None else country
@@ -271,7 +271,7 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
     if country != 'UZ':
         if longitude is None:
             raise ValueError('Both longitude and latitude are required')
-        from regional_storefront import RegionalStorefront
+        from better_lavka_mcp.region import RegionalStorefront
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).search(query, limit, longitude, latitude)
     async with create_http() as http:
@@ -279,8 +279,8 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
 
 @mcp.tool()
 @uz_only
-async def suggest_address(query: str) -> dict:
-    """Suggest addresses; never changes the account's delivery address."""
+async def search_addresses(query: str) -> dict:
+    """Read-only: return address suggestions for a free-text query. Suggestions do not change the saved delivery address or confirm that delivery is available."""
     async with create_http() as http:
         result = await Lavka(http).suggest(query)
         if not isinstance(result, (dict, list)):
@@ -289,13 +289,13 @@ async def suggest_address(query: str) -> dict:
 
 @mcp.tool()
 @uz_only
-async def saved_address_count() -> dict:
-    """Count saved favorite addresses without exposing their details."""
+async def count_saved_addresses() -> dict:
+    """Read-only: return the number of saved favorite addresses without their details. Requires an authenticated Uzbekistan session."""
     async with create_http() as http:
         return await Lavka(http).saved_address_count()
 
 async def _cart_client(http, longitude, latitude):
-    from lavka_cart import CartClient
+    from better_lavka_mcp.cart import CartClient
     client = Lavka(http)
     props = await client.bootstrap()
     if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
@@ -325,7 +325,7 @@ def _cart_view(cart):
 @mcp.tool()
 @uz_only
 async def get_cart(longitude: float, latitude: float) -> dict:
-    """Read the cart for these coordinates; does not select an address."""
+    """Read-only: return the cart at longitude, latitude (items, quantities, prices, total UZS, checkout availability). Does not select a delivery address or payment card."""
     async with create_http() as http:
         client = await _cart_client(http, longitude, latitude)
         return _cart_view(await client.retrieve())
@@ -333,18 +333,18 @@ async def get_cart(longitude: float, latitude: float) -> dict:
 
 @mcp.tool()
 @uz_only
-async def set_cart_item(longitude: float, latitude: float, product_id: str, quantity: int, price: str) -> dict:
-    """Change cart item to an absolute quantity (0 removes). Explicit cart write; price must be from current search. Never retries ambiguous writes."""
+async def set_cart_quantity(longitude: float, latitude: float, product_id: str, quantity: int, price_uzs: str) -> dict:
+    """Modifies the real cart: set product_id to an absolute integer quantity (0 removes it) at longitude, latitude, passing price_uzs from the current search. Sent once with a cart readback check; never retried automatically."""
     async with create_http() as http:
         client = await _cart_client(http, longitude, latitude)
-        return _cart_view(await client.set_item(product_id, quantity, price))
+        return _cart_view(await client.set_item(product_id, quantity, price_uzs))
 
 
 @mcp.tool()
 @uz_only
-async def saved_cards(longitude: float, latitude: float) -> dict:
-    """List available saved cards by masked suffix only; this does not select one."""
-    from lavka_payment import PaymentClient
+async def list_saved_cards(longitude: float, latitude: float) -> dict:
+    """Read-only: list saved cards as masked suffixes such as "**** 1234" at longitude, latitude (the payment API requires coordinates). Does not select a card or charge anything."""
+    from better_lavka_mcp.payment import PaymentClient
     async with create_http() as http:
         props = await Lavka(http).bootstrap()
         cards = await PaymentClient(http, props, [longitude, latitude]).lookup()
@@ -353,16 +353,16 @@ async def saved_cards(longitude: float, latitude: float) -> dict:
 
 @mcp.tool()
 @uz_only
-async def order_history(count: int = 21, older_than: str | None = None) -> dict:
-    """Read authenticated order history; older_than is a timezone-aware ISO timestamp."""
+async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
+    """Read-only: list up to 21 past orders (ID, timestamps, status), optionally before a timezone-aware older_than timestamp. Pagination may miss orders that share the last timestamp."""
     async with create_http() as http:
-        return await Lavka(http).order_history(count, older_than)
+        return await Lavka(http).order_history(limit, older_than)
 
 
 @mcp.tool()
 @uz_only
-async def active_orders() -> dict:
-    """Read the active tracking feed; an empty feed is not order history or reconciliation."""
+async def list_active_orders() -> dict:
+    """Read-only: return the active-order tracking feed. An empty feed does not prove there are no orders and cannot reconcile an uncertain submission."""
     async with create_http() as http:
         props = await Lavka(http).bootstrap()
         if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
@@ -379,7 +379,7 @@ async def active_orders() -> dict:
             raise
         except Exception:
             raise UpstreamError('Active-order read failed or was not JSON') from None
-        from lavka_tracking_projection import project_tracking_response, TrackingShapeError
+        from better_lavka_mcp.orders.tracking import project_tracking_response, TrackingShapeError
         try:
             return project_tracking_response(data)
         except TrackingShapeError:
@@ -388,19 +388,9 @@ async def active_orders() -> dict:
 
 @mcp.tool()
 @uz_only
-async def checkout_preview(longitude: float, latitude: float) -> dict:
-    """Read a cart quote only; no address/card selection, confirmation, order or payment."""
-    cart = await get_cart(longitude, latitude)
-    return {'cart': cart, 'address_selected': False, 'payment_selected': False,
-            'order_submission_enabled': False,
-            'limitation': 'This quote is not an order or a confirmation token. Use order_preview for a bound address/card checkout preview; server-side price enforcement is unknown.'}
-
-
-@mcp.tool()
-@uz_only
-async def saved_addresses() -> dict:
-    """List saved addresses with selection indexes; includes private address details."""
-    from lavka_order_mcp import addresses
+async def list_saved_addresses() -> dict:
+    """Read-only: list saved addresses with the index needed by get_saved_address_coordinates and preview_order. Contains private address details."""
+    from better_lavka_mcp.orders.submit import addresses
     async with create_http() as http:
         _, entries = await addresses(http)
         return {'addresses': [{'index': i, 'address': entry['address']} for i, entry in enumerate(entries)]}
@@ -408,45 +398,50 @@ async def saved_addresses() -> dict:
 
 @mcp.tool()
 @uz_only
-async def order_preview(address_index: int, card_suffix: str) -> dict:
-    """Stage an exact checkout preview for a saved-address index and four-digit card suffix. Not an order."""
-    from lavka_order_mcp import preview
+async def preview_order(saved_address_index: int, card_last4: str) -> dict:
+    """Creates a single-use five-minute local preview token for saved_address_index and card_last4, returning address, items, total UZS and masked card. Places no order and charges nothing, but records a local preview row; the cart must be available and non-rover."""
+    from better_lavka_mcp.orders.submit import preview
     async with create_http() as http:
-        return await preview(http, address_index, card_suffix)
+        return await preview(http, saved_address_index, card_last4)
 
 
 @mcp.tool()
 @uz_only
-async def submit_order(preview_token: str, confirmed_total_uzs: str, explicit_confirmation: bool) -> dict:
-    """Place one paid order only after explicit user confirmation of the exact preview; never retries. Outcomes may be uncertain."""
-    from lavka_order_mcp import submit
+async def submit_order(order_preview_token: str, confirmed_total_uzs: str, explicit_confirmation: bool) -> dict:
+    """Charges money: place one order from an unexpired order_preview_token after explicit_confirmation=true and confirmed_total_uzs exactly matching the preview total. Sent at most once; the result can be submitted, rejected or unknown, and payment is never verified."""
+    from better_lavka_mcp.orders.submit import submit
     async with create_http() as http:
-        return await submit(http, preview_token, confirmed_total_uzs, explicit_confirmation)
+        return await submit(http, order_preview_token, confirmed_total_uzs, explicit_confirmation)
 
 
 @mcp.tool()
 @uz_only
-async def reconcile_checkout(history_checked: bool, payment_checked: bool, acknowledge_uncertainty: bool, no_request_in_progress: bool, explicit_confirmation: bool) -> dict:
-    """Acknowledge an uncertain checkout after checking official history and payment. This cannot rule out delayed processing or duplicates; never retries or places an order."""
-    from lavka_order_mcp import reconcile_checkout as reconcile
-    return reconcile(history_checked=history_checked, payment_checked=payment_checked,
-                     acknowledge_uncertainty=acknowledge_uncertainty,
+async def reconcile_order_attempt(checked_order_history: bool, checked_payment: bool, accepts_duplicate_risk: bool, no_request_in_progress: bool, explicit_confirmation: bool) -> dict:
+    """Local state only: record that you checked official order history and payment, that no request is in progress, and that you accept duplicate-order risk, then release the unknown checkout block. Verifies nothing, places no order, and cannot rule out delayed processing."""
+    from better_lavka_mcp.orders.submit import reconcile_checkout as reconcile
+    return reconcile(history_checked=checked_order_history, payment_checked=checked_payment,
+                     acknowledge_uncertainty=accepts_duplicate_risk,
                      no_request_in_progress=no_request_in_progress, explicit_confirmation=explicit_confirmation)
 
 
 @mcp.tool()
 @uz_only
 async def cancel_order(order_id: str, explicit_confirmation: bool) -> dict:
-    """Cancel the exact order once only after explicit user confirmation. Refund status is unknown."""
-    from lavka_order_mcp import cancel
+    """Cancels an order: send at most one cancellation request for the exact order_id after explicit_confirmation=true. A response does not prove cancellation, refund status is unknown, and repeat cancellation attempts are blocked."""
+    from better_lavka_mcp.orders.submit import cancel
     async with create_http() as http:
         async def history():
             return await Lavka(http).order_history()
         return await cancel(http, order_id, explicit_confirmation, history)
 
 
-from qr_mcp import register_qr_tools
+from better_lavka_mcp.auth.tools import register_qr_tools
 register_qr_tools(mcp, STATE, uz_only)
 
-if __name__ == "__main__":
+
+def main():
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

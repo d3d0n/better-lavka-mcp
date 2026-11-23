@@ -9,7 +9,7 @@ def payload_args():
 
 
 def test_legacy_provider_payload_matches_intercepted_frontend():
-    from lavka_submit_payload import build_provider_payload
+    from better_lavka_mcp.orders.payload import build_provider_payload
     actual = build_provider_payload(**payload_args())
     assert actual == {
         "cartId": "FAKE_CART", "cartVersion": 7, "flowVersion": "grocery_flow_v1",
@@ -20,7 +20,7 @@ def test_legacy_provider_payload_matches_intercepted_frontend():
 
 
 def test_sbp_legacy_ids_follow_frontend():
-    from lavka_submit_payload import build_provider_payload
+    from better_lavka_mcp.orders.payload import build_provider_payload
     for kind in ("sbp", "sbp_bind_token"):
         args = payload_args()
         args.update(payment_type=kind, payment_id="FAKE_CARD")
@@ -28,7 +28,7 @@ def test_sbp_legacy_ids_follow_frontend():
 
 
 def test_optional_fields_are_serialized_without_invented_fields():
-    from lavka_submit_payload import build_provider_payload
+    from better_lavka_mcp.orders.payload import build_provider_payload
     args = payload_args()
     args["options"] = {"serviceFee": "1000", "useRover": False, "timeslot": {"id": "FAKE"}}
     result = build_provider_payload(**args)
@@ -41,7 +41,7 @@ def test_optional_fields_are_serialized_without_invented_fields():
 
 
 def test_new_payment_branch_and_legacy_branch_are_exclusive():
-    from lavka_submit_payload import build_provider_payload
+    from better_lavka_mcp.orders.payload import build_provider_payload
     args = payload_args()
     args.pop("payment_type")
     args.pop("payment_id")
@@ -63,7 +63,7 @@ def test_new_payment_branch_and_legacy_branch_are_exclusive():
     {"options": {"serviceFee": float('nan')}},
 ])
 def test_invalid_payloads_are_rejected(change):
-    from lavka_submit_payload import build_provider_payload
+    from better_lavka_mcp.orders.payload import build_provider_payload
     args = payload_args()
     args.update(change)
     with pytest.raises(ValueError):

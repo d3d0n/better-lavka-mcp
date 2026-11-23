@@ -1,7 +1,7 @@
 import json
 import httpx
 import pytest
-from lavka_uz import Lavka, UpstreamError
+from better_lavka_mcp.server import Lavka, UpstreamError
 
 @pytest.mark.asyncio
 async def test_saved_address_count_requires_valid_session_and_hides_details():

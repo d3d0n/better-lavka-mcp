@@ -2,7 +2,7 @@
 import copy
 import pytest
 
-from lavka_submit_payload import build_provider_payload
+from better_lavka_mcp.orders.payload import build_provider_payload
 
 
 def build(cart, **changes):

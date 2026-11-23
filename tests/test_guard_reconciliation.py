@@ -5,7 +5,7 @@ import time
 
 import httpx
 import pytest
-from lavka_live_transport import AttemptGuard, AttemptBlocked, submit_once
+from better_lavka_mcp.orders.guard import AttemptGuard, AttemptBlocked, submit_once
 
 
 def evidence():

@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-import lavka_order_mcp as orders
+from better_lavka_mcp.orders import submit as orders
 
 
 @pytest.mark.asyncio

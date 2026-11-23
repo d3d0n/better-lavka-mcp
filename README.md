@@ -1,70 +1,158 @@
-# Yandex Lavka Uzbekistan MCP
+<h1 align="center">Better Lavka MCP 🛒</h1>
 
-**A local MCP server for exploring and managing a Yandex Lavka Uzbekistan cart—with explicit controls around consequential writes.**
+<p align="center">
+  <strong>Groceries from Yandex Lavka Uzbekistan, ordered by your AI assistant.</strong>
+</p>
 
-Unofficial · Uzbekistan ordering; RU/KZ anonymous search · Python · stdio
+<p align="center">
+  <a href="docs/auth.md">Sign in</a> ·
+  <a href="docs/checkout.md">Checkout</a> ·
+  <a href="docs/clients.md">Clients</a> ·
+  <a href="SECURITY.md">Security</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="LICENSE">GPL-3.0</a>
+</p>
 
-> [!WARNING]
-> This server can modify a real cart, submit a paid order, and request cancellation. Its order and cancellation MCP paths are tested with mocked upstream responses, **not a new live MCP transaction**. Official-site transactions were observed separately; they do not prove this implementation works end to end. Use only with trusted clients, review every consequential action, and never retry an uncertain write blindly.
+---
 
-## From a question to a cart
+## What is this, really?
 
-Connect a local MCP client, then ask it to search for products at a location in Uzbekistan. It can read the cart, show masked saved-card suffixes and quote a checkout. Cart updates and ordering are separate actions; a quote is neither a reservation nor a payment.
+A local **stdio MCP server** that talks to the same undocumented web API as `lavka.yandex.uz`. Connect it to Claude, Codex, OpenCode or any MCP client, and the assistant can search the shelves, fill your cart and place a real order on your real account.
 
-| Capability | Tools | Boundary |
-|---|---|---|
-| Discover | `select_region`, `delivery_location`, `detect_delivery_location`, `service_status`, `suggest_address`, `search_products` | `select_region`, `service_status` and `search_products` accept explicit RU/KZ/UZ; other discovery tools remain UZ-only. Homepage status and suggestions do not establish address coverage. |
-| Sign in | `login_start`, `qr_login_status`, `qr_login_cancel` | Private, short-lived QR login; see [authentication](docs/auth.md). |
-| Cart | `get_cart`, `set_cart_item`, `checkout_preview` | Coordinates are longitude, latitude; a cart quote does not select an address or card. `set_cart_item` is a real write. |
-| Account and orders | `saved_address_count`, `saved_addresses`, `saved_cards`, `active_orders`, `order_history` | Address details and order identifiers are private. Active tracking is not history. |
-| Checkout | `order_preview`, `submit_order`, `reconcile_checkout`, `cancel_order` | Explicit confirmation and careful reconciliation are essential; see [checkout](docs/checkout.md). |
+No browser automation, no cookie copy-paste: you sign in by scanning a QR code with the Yandex app. State lives in a private directory on your machine, nowhere else.
 
-Prices, availability and delivery charges change. The server uses undocumented web APIs that may change or reject requests, and it is not affiliated with Yandex. Country-level currency confirmation does not prove coverage at an individual address.
+---
 
-## Country and delivery location
+## Stuff you do with it
 
-Choose a startup country when adding the MCP server by setting `YANDEX_LAVKA_REGION` to `UZ`, `RU`, or `KZ`; if omitted it defaults to `UZ`. Any other value prevents startup. See [client setup](docs/clients.md) for configuration examples. At any time call `select_region(country="RU")` (or `KZ` or `UZ`) to change the default for `service_status` and `search_products`. Selection is in memory for this stdio server process only; it is not written to a shared file and resets to the configured startup value when restarted. Use a separate server process per client session; this is not per-client isolation for a shared multi-client server.
+- **Ask what's on the shelf.** «Chilonzorda sut bormi?» — milk and its price at the nearest Lavka.
+- **Build the cart by talking.** «Добавь два кефира и хлеб» — done, and the assistant tells you the new total.
+- **Order in one sentence.** "Order it home, card ending 4242" — the assistant shows the address, items and total.
+- **Say yes.** The order goes out.
+- **Check on orders.** «Покажи прошлые заказы», «отмени заказ».
+- **Peek at Russia and Kazakhstan.** Browse the RU and KZ storefronts and search their products.
 
-`service_status(country="RU")` and `search_products(country="KZ", longitude=..., latitude=...)` explicitly override the selected country for that read only, without changing the selection. RU/KZ reads use fresh anonymous country-specific sessions and confirm currency. Login, address suggestions, location helpers, cart, payments and checkout are UZ-only and are refused while RU/KZ is selected. A region change is rejected while a UZ tool is in flight; retry after it completes, especially for an order with an uncertain outcome. Switching itself places no order. No country is inferred from IP or device geolocation.
+---
 
-For a delivery location, call `delivery_location(country="UZ", longitude=..., latitude=...)`, or use `detect_delivery_location(country="UZ")` with an authenticated session. Detection returns candidate coordinates only when exactly one favorite exists; zero or multiple favorites require an explicit choice. For multiple favorites, review `saved_addresses` and pass its freshly obtained `address_index` to `detect_delivery_location`. Alternatively, use `suggest_address` and choose an address with usable coordinates. Indexes can change and similar favorites may differ in apartment details; verify the exact address before checkout.
+## Three little stories
 
-These tools are stateless: changing location means passing the new coordinates to **each** search, cart and quote call. They do not update the account's address, select a checkout address, or persist a default. Refresh search and cart after a change; old prices and carts may be stale and cart identity may be shared across locations. Review the exact saved address again in `order_preview`. The bounding box is only a coarse input check, not proof that the coordinates lie in Uzbekistan or that delivery is available. Coordinates and saved addresses are private; use a trusted client and beware client logs.
+**Sunday restock.** You type *«закажи молоко, яйца и хлеб домой, картой 4242»*. The assistant finds them, fills the cart, shows you the total. You say «да», and breakfast is on its way.
 
-## Get started
+**Recipe to cart.** You paste a plov recipe and say *«собери всё для этого на четверых»*. Rice, carrots, lamb, oil and cumin land in the cart in the right amounts. Anything out of stock, the assistant tells you and offers a swap.
 
-Install [mise](https://mise.jdx.dev/getting-started.html) first. From the repository root on a Unix-like system:
+**Same again.** *«Oxirgi buyurtmalarimni ko‘rsat»* The assistant lists your recent orders and answers in Uzbek, because that's how you asked.
 
+---
+
+## Works today · Not yet
+
+| ✅ Works today | 🚧 Not yet |
+|---|---|
+| Sign in with a QR code from the Yandex app | 3-D Secure confirmation inside the chat |
+| Product and address search, cart editing | Scheduled delivery slots |
+| Saved addresses and cards, order history | Live order tracking |
+| Order to a saved address with a chosen card, cancel an order | |
+| Browse the RU and KZ storefronts | Ordering in Russia and Kazakhstan |
+
+---
+
+## Getting started
+
+You need [mise](https://mise.jdx.dev/getting-started.html) and a Unix-like system.
+
+**Once:**
 ```sh
-mise trust
-mise install
-mise run install
-mise run test
-.venv/bin/yandex-lavka-mcp
+git clone https://github.com/d3d0n/better-lavka-mcp.git && cd better-lavka-mcp
+mise trust && mise install
+mise run install   # Python 3.12 + deps from uv.lock
+mise run test      # offline suite, no network, no money
 ```
 
-`mise` manages `uv`; the install task uses `uv` to install a managed Python 3.12 and synchronize dependencies from `uv.lock`. The test task runs the offline suite.
+**Then plug it into your client:**
+```json
+{
+  "mcpServers": {
+    "lavka": {
+      "type": "stdio",
+      "command": "/absolute/path/to/better-lavka-mcp/.venv/bin/better-lavka-mcp"
+    }
+  }
+}
+```
 
-The last command starts an MCP **stdio** server; it waits for an MCP client and is not an interactive CLI. Stop it with Ctrl-C. For a client, configure the virtual environment's Python as the command and the absolute path to `lavka_uz.py` as its argument. See [client setup](docs/clients.md) for a JSON example and connection checks.
+Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](docs/clients.md).
 
-Ask your client to call `login_start` when authenticated access is needed, then scan its QR code in the Yandex app or open its link, and poll `qr_login_status`. **The QR image and link are temporary credentials**: use a private, trusted client and channel; clients and chat logs may retain them. An existing session is not replaced unless explicitly requested.
+Settings:
 
-## Safety in practice
+- `YANDEX_LAVKA_REGION` — startup country: `UZ` (default), `RU` or `KZ`. `select_country` changes it for this process only.
+- `YANDEX_SESSION_FILE` — where the session cookies live.
 
-- Confirm the exact item and quantity before a cart write. Quantities are absolute; zero removes an item. An ambiguous result calls for a fresh cart read, not an automatic retry.
-- Before an order, review the exact saved address, items, total in UZS, masked card and delivery in `order_preview`; obtain explicit user approval for those terms. The preview expires and can change before submission.
-- An order ID is not proof of payment. A cancellation response is not proof of cancellation or refund. Check the exact order in the official app and inspect payment independently.
-- The local duplicate-order guard does not cover other clients or installations. Unknown outcomes can be delayed; empty active tracking is not proof that no order exists. [Read the recovery procedure](docs/checkout.md).
+---
 
-## Documentation
+## Tools
 
-- [Client setup and connection checks](docs/clients.md)
-- [Authentication and session security](docs/auth.md)
-- [Cart, checkout, tracking and cancellation](docs/checkout.md)
-- [Contributing and tests](CONTRIBUTING.md) · [Security reporting](SECURITY.md)
+Twenty tools with plain verb + noun names, so the assistant picks the right one on the first try.
 
-The root-level research notes are historical and may describe older implementations; where they conflict, use the current source and these operational guides.
+| Tool | What it does |
+|---|---|
+| `search_products` | Find products and prices |
+| `get_cart` | What's in the cart and the total |
+| `set_cart_quantity` | Add, change or remove an item |
+| `list_saved_addresses` | Your saved addresses |
+| `list_saved_cards` | Your saved cards |
+| `preview_order` | Address, card, items and total before ordering |
+| `submit_order` | Place the order |
+| `cancel_order` | Cancel an order |
+| `list_active_orders` | Whether any orders are currently tracked |
+| `list_order_history` | Past orders |
+| `start_login` · `get_login_status` · `cancel_login` | Sign in with a QR code |
+| `search_addresses` | Find an address by text |
+| `get_saved_address_coordinates` · `check_coordinates` | Turn an address into a delivery point |
+| `count_saved_addresses` | How many addresses are saved |
+| `get_storefront_status` | Is Lavka open, delivery time |
+| `select_country` | Switch between UZ, RU and KZ |
+| `reconcile_order_attempt` | Unblock ordering after a dropped connection |
 
-## License
+---
 
-[GNU General Public License v3.0 only](LICENSE) (GPL-3.0-only).
+## Under the hood
+
+```mermaid
+flowchart LR
+  C[MCP client] -- stdio --> S[server.py<br>tools · country gate]
+  S --> A[auth/<br>QR login]
+  S --> K[cart · payment]
+  S --> R[region.py<br>RU/KZ anonymous]
+  S --> O[orders/<br>preview · guard · submit · cancel]
+  O --> DB[(SQLite<br>tokens · guard)]
+  A --> F[(session file)]
+  K & O & R --> L[Lavka web API]
+```
+
+Session and order state live under `~/.local/share/yandex-lavka-mcp/`.
+
+<details>
+<summary><strong>Code map</strong></summary>
+
+`src/better_lavka_mcp/`
+
+- `server.py` — the tools
+- `auth/` — QR sign-in
+- `cart.py`, `payment.py`, `region.py` — cart, saved cards, RU/KZ storefronts
+- `orders/` — preview, submit, cancel, tracking
+- `constants.py`, `errors.py` — shared bits
+
+</details>
+
+---
+
+## What it is not
+
+- Not official. Not affiliated with or endorsed by Yandex. The API is undocumented and may change.
+- Not a payment processor. It never sees full card numbers.
+
+---
+
+<p align="center">
+  <sub>Unofficial · runs on your machine · <a href="LICENSE">GPL-3.0-only</a></sub>
+</p>

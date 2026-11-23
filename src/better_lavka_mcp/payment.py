@@ -2,7 +2,9 @@
 import math
 import re
 from dataclasses import dataclass, field
-from lavka_uz import BASE, UpstreamError
+
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.errors import UpstreamError
 
 @dataclass
 class PaymentResults:

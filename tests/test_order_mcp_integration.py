@@ -1,13 +1,13 @@
 import json
 import httpx
 import pytest
-import lavka_uz
-import lavka_order_mcp as orders
+from better_lavka_mcp import server
+from better_lavka_mcp.orders import submit as orders
 
 @pytest.mark.asyncio
 async def test_order_tools_are_exposed():
-    names = {tool.name for tool in await lavka_uz.mcp.list_tools()}
-    assert {'order_preview', 'submit_order', 'cancel_order', 'saved_addresses'} <= names
+    names = {tool.name for tool in await server.mcp.list_tools()}
+    assert {'preview_order', 'submit_order', 'cancel_order', 'list_saved_addresses'} <= names
 
 @pytest.mark.asyncio
 async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
@@ -28,7 +28,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         if path.endswith('cancel'): return httpx.Response(200,json={})
         raise AssertionError(path)
     async def boot(self): self.props=props; return props
-    monkeypatch.setattr(lavka_uz.Lavka,'bootstrap',boot)
+    monkeypatch.setattr(server.Lavka,'bootstrap',boot)
     monkeypatch.setattr(orders,'GUARD',tmp_path/'guard')
     monkeypatch.setattr(orders,'STATE',tmp_path/'previews')
     monkeypatch.setattr(orders,'CANCEL_STATE',tmp_path/'cancel')
@@ -89,7 +89,7 @@ async def test_cancel_timeout_never_retries(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, 'CANCEL_STATE', tmp_path/'cancel')
     async def boot(self):
         self.props={'pageData':{'passportInfo':{'status':'VALID'}}}; return self.props
-    monkeypatch.setattr(lavka_uz.Lavka,'bootstrap',boot)
+    monkeypatch.setattr(server.Lavka,'bootstrap',boot)
     calls=[]
     def handle(request):
         calls.append(request.url.path)
@@ -161,12 +161,12 @@ def test_unknown_reconciliation_requires_acknowledgement_and_audit(tmp_path, mon
 
 @pytest.mark.asyncio
 async def test_reconciliation_tool_exposed():
-    assert "reconcile_checkout" in {tool.name for tool in await lavka_uz.mcp.list_tools()}
+    assert "reconcile_order_attempt" in {tool.name for tool in await server.mcp.list_tools()}
 
 
 def test_prior_known_rejection_released_without_bank_claim(tmp_path, monkeypatch):
     import sqlite3
-    from lavka_live_transport import AttemptGuard
+    from better_lavka_mcp.orders.guard import AttemptGuard
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     guard = AttemptGuard(orders.GUARD)
     guard.reserve()

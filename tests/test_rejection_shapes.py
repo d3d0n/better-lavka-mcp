@@ -1,4 +1,4 @@
-from lavka_rejection_capture import sanitize_rejection
+from better_lavka_mcp.orders.rejection import sanitize_rejection
 
 
 def test_frontend_response_wrapper_and_checkout_reason_are_extracted_safely():

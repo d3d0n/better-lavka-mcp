@@ -9,14 +9,14 @@ import stat
 import time
 from pathlib import Path
 
-from lavka_live_transport import GUARD
-from lavka_uz import BASE, Lavka, UpstreamError
-from lavka_cart import CartClient
-from lavka_payment import PaymentClient
-from lavka_submit_payload import build_provider_payload
-from lavka_live_transport import AttemptGuard, AttemptBlocked
-from lavka_rejection_capture import sanitize_rejection, sanitize_upstream_error
-from lavka_cancel import cancel_order as cancel_once
+from better_lavka_mcp.cart import CartClient
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.orders.cancel import cancel_order as cancel_once
+from better_lavka_mcp.orders.guard import GUARD, AttemptBlocked, AttemptGuard
+from better_lavka_mcp.orders.payload import build_provider_payload
+from better_lavka_mcp.orders.rejection import sanitize_rejection, sanitize_upstream_error
+from better_lavka_mcp.payment import PaymentClient
+from better_lavka_mcp.server import Lavka, UpstreamError
 
 STATE = Path.home() / '.local/share/yandex-lavka-mcp/order-previews.sqlite'
 CANCEL_STATE = Path.home() / '.local/share/yandex-lavka-mcp/cancellation.sqlite'
@@ -262,7 +262,7 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation):
                     'explicit_confirmation_required': True,
                     'instructions': [
                         'Yandex rejected checkout with a fee validation error; its storefront displays a generic price-changed alert. The cause and any product price change are not established.',
-                        'Obtain a fresh cart and order_preview for the same address and card; do not reuse the consumed preview.',
+                        'Obtain a fresh cart and preview_order for the same address and card; do not reuse the consumed preview.',
                         'Compare and inform the user of old and new totals and item, fee, delivery, and availability changes; do not invent unavailable details.',
                         'Respect the user’s price budget and constraints; if the new total exceeds them, do not submit unless the user explicitly changes the budget.',
                         'Ask for explicit confirmation of the new preview and total before a new submit; never submit automatically.',

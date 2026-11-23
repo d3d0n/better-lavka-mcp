@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from lavka_errors import UpstreamError
+from better_lavka_mcp.errors import UpstreamError
 
 PASSPORT = 'https://passport.yandex.uz'
 BFF = PASSPORT + '/pwl-yandex/api/passport'

@@ -3,8 +3,8 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_qr_pending_status_keeps_live_session_and_writes_private_image(tmp_path, monkeypatch):
-    import qr_auth
-    from qr_runtime import QRManager
+    from better_lavka_mcp.auth import qr as qr_auth
+    from better_lavka_mcp.auth.runtime import QRManager
     class FakeAuth:
         def __init__(self, http): pass
         async def start(self): return 'https://passport.yandex.uz/qr'
@@ -20,8 +20,8 @@ async def test_qr_pending_status_keeps_live_session_and_writes_private_image(tmp
 
 @pytest.mark.asyncio
 async def test_qr_confirmation_saves_private_session_and_closes(tmp_path, monkeypatch):
-    import qr_auth
-    from qr_runtime import QRManager
+    from better_lavka_mcp.auth import qr as qr_auth
+    from better_lavka_mcp.auth.runtime import QRManager
     class FakeAuth:
         def __init__(self, http): self.http = http
         async def start(self): return 'https://passport.yandex.uz/qr'

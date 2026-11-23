@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from lavka_tracking_projection import TrackingShapeError, project_tracking_response
+from better_lavka_mcp.orders.tracking import TrackingShapeError, project_tracking_response
 
 
 def test_observed_empty_array():

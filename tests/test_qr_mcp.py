@@ -2,7 +2,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_start_hides_qr_link_and_prevents_existing_session_replacement(tmp_path):
-    from qr_mcp import QRLogin
+    from better_lavka_mcp.auth.tools import QRLogin
     class Manager:
         def __init__(self): self.auth = None
         async def start(self):
@@ -20,7 +20,7 @@ async def test_start_hides_qr_link_and_prevents_existing_session_replacement(tmp
 
 @pytest.mark.asyncio
 async def test_verified_session_is_saved_and_status_checked(tmp_path):
-    from qr_mcp import QRLogin
+    from better_lavka_mcp.auth.tools import QRLogin
     class Manager:
         auth = None
         session_path = tmp_path / 'staged'
@@ -43,7 +43,7 @@ async def test_verified_session_is_saved_and_status_checked(tmp_path):
 
 @pytest.mark.asyncio
 async def test_concurrent_session_change_is_not_overwritten(tmp_path):
-    from qr_mcp import QRLogin
+    from better_lavka_mcp.auth.tools import QRLogin
     class Manager:
         auth = None
         session_path = tmp_path / 'staged'
@@ -67,8 +67,8 @@ async def test_concurrent_session_change_is_not_overwritten(tmp_path):
 @pytest.mark.asyncio
 async def test_registered_tools_are_discoverable(tmp_path):
     from mcp.server.fastmcp import FastMCP
-    from qr_mcp import register_qr_tools
+    from better_lavka_mcp.auth.tools import register_qr_tools
     server = FastMCP('test')
     register_qr_tools(server, tmp_path / 'session')
     names = {tool.name for tool in await server.list_tools()}
-    assert {'login_start', 'qr_login_status', 'qr_login_cancel'} <= names
+    assert {'start_login', 'get_login_status', 'cancel_login'} <= names

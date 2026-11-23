@@ -8,7 +8,8 @@ import os
 import re
 import asyncio
 
-from lavka_uz import BASE, Lavka, create_http
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.server import Lavka, create_http
 
 
 class ObservationError(Exception):

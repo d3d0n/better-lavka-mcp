@@ -16,13 +16,13 @@ def test_custom_session_fresh_home_initializes_all_order_state(tmp_path, first):
         import stat
         from pathlib import Path
         import httpx
-        import lavka_order_mcp as orders
-        import lavka_uz
+        from better_lavka_mcp.orders import submit as orders
+        from better_lavka_mcp import server
 
         async def bootstrap(self):
             self.props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return self.props
-        lavka_uz.Lavka.bootstrap = bootstrap
+        server.Lavka.bootstrap = bootstrap
         async def history():
             return {'orders': [{'order_id': 'test', 'status': 'canceled'}]}
         async def run():
@@ -67,7 +67,7 @@ def test_unsafe_existing_state_directory_is_rejected_without_modification(tmp_pa
     env = os.environ.copy()
     env.update(HOME=str(home), YANDEX_SESSION_FILE=str(tmp_path / 'custom/session.json'))
     script = """\
-import lavka_order_mcp as orders
+from better_lavka_mcp.orders import submit as orders
 try:
     orders._guard_db()
 except (ValueError, OSError):

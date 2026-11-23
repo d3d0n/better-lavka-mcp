@@ -1,11 +1,11 @@
 import json
 import httpx
 import pytest
-import lavka_uz
+from better_lavka_mcp import server
 
 
 @pytest.mark.asyncio
-async def test_cart_mcp_read_update_preview_and_masked_cards(monkeypatch):
+async def test_cart_mcp_read_update_and_masked_cards(monkeypatch):
     calls = []
     def handle(request):
         path = request.url.path
@@ -24,15 +24,10 @@ async def test_cart_mcp_read_update_preview_and_masked_cards(monkeypatch):
         if path.endswith('/methods'):
             return httpx.Response(200, json={'methods': [{'type': 'card', 'availability': {'available': True}, 'id': 'secret-card', 'number': '1234567890123456'}]})
         raise AssertionError(path)
-    monkeypatch.setattr(lavka_uz, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    assert (await lavka_uz.get_cart(69, 41))['items'] == []
-    result = await lavka_uz.set_cart_item(69, 41, 'product', 1, '100')
+    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    assert (await server.get_cart(69, 41))['items'] == []
+    result = await server.set_cart_quantity(69, 41, 'product', 1, '100')
     assert result['items'][0]['quantity'] == '1'
     assert 'secret-cart' not in json.dumps(result)
-    assert (await lavka_uz.saved_cards(69, 41))['cards'] == ['**** 3456']
-    preview = await lavka_uz.checkout_preview(69, 41)
-    assert preview['order_submission_enabled'] is False
-    assert preview['address_selected'] is False
-    assert preview['payment_selected'] is False
-    assert 'secret-cart' not in json.dumps(preview)
+    assert (await server.list_saved_cards(69, 41))['cards'] == ['**** 3456']
     assert not any('submit' in path for path in calls)

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from regional_storefront import RegionalStorefront
+from better_lavka_mcp.region import RegionalStorefront
 
 
 @pytest.mark.asyncio

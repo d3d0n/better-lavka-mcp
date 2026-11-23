@@ -7,8 +7,8 @@ import json
 import httpx
 import pytest
 
-from lavka_cart import CartClient
-from lavka_uz import UpstreamError
+from better_lavka_mcp.cart import CartClient
+from better_lavka_mcp.server import UpstreamError
 
 
 PROPS = {"pageData": {"passportInfo": {"status": "VALID"}}}

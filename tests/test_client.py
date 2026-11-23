@@ -1,7 +1,7 @@
 import json
 import pytest
 import httpx
-from lavka_uz import Lavka, UpstreamError
+from better_lavka_mcp.server import Lavka, UpstreamError
 
 @pytest.mark.asyncio
 async def test_search_uses_uz_currency_and_surfaces_csrf_failure():
@@ -23,13 +23,13 @@ async def test_search_uses_uz_currency_and_surfaces_csrf_failure():
 
 
 def test_existing_cookie_jar_is_loaded_without_widening_domain(tmp_path, monkeypatch):
-    import lavka_uz
+    from better_lavka_mcp import server
     import http.cookiejar
     cookie = http.cookiejar.Cookie(0, "Session_id", "secret", None, False, ".yandex.ru", True, True, "/", True, True, None, True, None, None, {}, False)
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"cookies": [cookie.__dict__]}))
-    monkeypatch.setattr(lavka_uz, "STATE", str(state))
-    client = lavka_uz.create_http()
+    monkeypatch.setattr(server, "STATE", str(state))
+    client = server.create_http()
     assert next(iter(client.cookies.jar)).domain == ".yandex.ru"
     request = client.build_request("GET", "https://lavka.yandex.uz/")
     assert "cookie" not in request.headers

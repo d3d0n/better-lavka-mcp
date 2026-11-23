@@ -1,4 +1,4 @@
-from lavka_rejection_capture import sanitize_rejection
+from better_lavka_mcp.orders.rejection import sanitize_rejection
 
 
 def test_known_nested_error_is_captured_without_sensitive_fields():

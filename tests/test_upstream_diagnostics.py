@@ -1,4 +1,4 @@
-from lavka_rejection_capture import sanitize_upstream_error
+from better_lavka_mcp.orders.rejection import sanitize_upstream_error
 
 
 def test_unknown_structured_error_code_and_status_are_preserved():

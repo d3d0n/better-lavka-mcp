@@ -18,7 +18,7 @@ def snapshot():
 
 
 def test_preview_stages_complete_snapshot(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety
+    from better_lavka_mcp.orders.checkout import CheckoutSafety
     store = CheckoutSafety(tmp_path / "checkout.sqlite3")
     preview = store.preview(snapshot)
     assert preview["snapshot"] == snapshot
@@ -27,7 +27,7 @@ def test_preview_stages_complete_snapshot(tmp_path, snapshot):
 
 
 def test_confirmation_consumes_preview_once_and_remains_offline(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     store = CheckoutSafety(tmp_path / "checkout.sqlite3")
     preview = store.preview(snapshot)
     result = store.confirm(preview["preview_token"], snapshot, confirmed_total_uzs="15000.00", explicit_confirmation=True)
@@ -45,7 +45,7 @@ def test_confirmation_consumes_preview_once_and_remains_offline(tmp_path, snapsh
     ("available_for_checkout", False),
 ])
 def test_preview_rejects_incomplete_or_unsafe_snapshot(tmp_path, snapshot, field, value):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     snapshot[field] = value
     with pytest.raises(CheckoutError):
         CheckoutSafety(tmp_path / "state.sqlite3").preview(snapshot)
@@ -59,7 +59,7 @@ def test_preview_rejects_incomplete_or_unsafe_snapshot(tmp_path, snapshot, field
     ("items", [{"id": "2", "title": "Eggs", "quantity": "1", "price_uzs": "15000.00"}]),
 ])
 def test_confirmation_rejects_snapshot_drift(tmp_path, snapshot, field, value):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     store = CheckoutSafety(tmp_path / "state.sqlite3")
     token = store.preview(snapshot)["preview_token"]
     live = copy.deepcopy(snapshot)
@@ -69,7 +69,7 @@ def test_confirmation_rejects_snapshot_drift(tmp_path, snapshot, field, value):
 
 
 def test_preview_expiry_and_explicit_confirmation(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     now = [1000.0]
     store = CheckoutSafety(tmp_path / "state.sqlite3", clock=lambda: now[0], max_age_seconds=30)
     token = store.preview(snapshot)["preview_token"]
@@ -81,7 +81,7 @@ def test_preview_expiry_and_explicit_confirmation(tmp_path, snapshot):
 
 
 def test_concurrent_confirmation_only_one_succeeds(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     path = tmp_path / "state.sqlite3"
     token = CheckoutSafety(path).preview(snapshot)["preview_token"]
     def confirm():
@@ -96,14 +96,14 @@ def test_concurrent_confirmation_only_one_succeeds(tmp_path, snapshot):
 
 
 def test_state_database_is_private(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety
+    from better_lavka_mcp.orders.checkout import CheckoutSafety
     path = tmp_path / "state.sqlite3"
     CheckoutSafety(path).preview(snapshot)
     assert os.stat(path).st_mode & 0o077 == 0
 
 
 def test_repreview_does_not_extend_existing_expiry(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     now = [1000.0]
     path = tmp_path / "state.sqlite3"
     token = CheckoutSafety(path, clock=lambda: now[0], max_age_seconds=10).preview(snapshot)["preview_token"]
@@ -113,7 +113,7 @@ def test_repreview_does_not_extend_existing_expiry(tmp_path, snapshot):
 
 
 def test_unknown_token_and_total_mismatch_fail(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     store = CheckoutSafety(tmp_path / "state.sqlite3")
     token = store.preview(snapshot)["preview_token"]
     for submitted_token, total in [("wrong", "15000.00"), (token, "15000.01"), (token, 15000)]:
@@ -122,14 +122,14 @@ def test_unknown_token_and_total_mismatch_fail(tmp_path, snapshot):
 
 
 def test_preview_unknown_fields_cannot_hide_card_secrets(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     snapshot["payment"]["card_number"] = "4111111111111111"
     with pytest.raises(CheckoutError):
         CheckoutSafety(tmp_path / "state.sqlite3").preview(snapshot)
 
 
 def test_preview_duplicate_staged_tokens_are_not_two_authorizations(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     store = CheckoutSafety(tmp_path / "state.sqlite3")
     a = store.preview(snapshot)["preview_token"]
     b = store.preview(snapshot)["preview_token"]
@@ -139,7 +139,7 @@ def test_preview_duplicate_staged_tokens_are_not_two_authorizations(tmp_path, sn
 
 
 def test_uncertain_state_cannot_be_retried_or_repreviewed(tmp_path, snapshot):
-    from lavka_checkout import CheckoutSafety, CheckoutError
+    from better_lavka_mcp.orders.checkout import CheckoutSafety, CheckoutError
     store = CheckoutSafety(tmp_path / "state.sqlite3")
     token = store.preview(snapshot)["preview_token"]
     other_token = store.preview(snapshot)["preview_token"]

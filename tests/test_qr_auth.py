@@ -4,12 +4,12 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from lavka_uz import UpstreamError
+from better_lavka_mcp.server import UpstreamError
 
 
 @pytest.mark.asyncio
 async def test_qr_start_returns_validated_link_and_pending_status():
-    from qr_auth import PassportQR
+    from better_lavka_mcp.auth.qr import PassportQR
     def handle(request):
         assert request.url.host == 'passport.yandex.uz'
         if request.method == 'GET':
@@ -32,7 +32,7 @@ async def test_qr_start_returns_validated_link_and_pending_status():
 
 @pytest.mark.asyncio
 async def test_qr_rejects_external_link():
-    from qr_auth import PassportQR
+    from better_lavka_mcp.auth.qr import PassportQR
     def handle(request):
         if request.method == 'GET':
             return httpx.Response(200, text='__CSRF__ = "csrf-value"')
@@ -46,7 +46,7 @@ async def test_qr_rejects_external_link():
 
 @pytest.mark.asyncio
 async def test_qr_completion_requires_confirmed_state_and_session_cookie():
-    from qr_auth import PassportQR
+    from better_lavka_mcp.auth.qr import PassportQR
     def handle(request):
         if request.method == 'GET':
             return httpx.Response(200, text='__CSRF__ = "csrf-value"')

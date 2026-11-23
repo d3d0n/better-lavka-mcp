@@ -9,8 +9,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-from lavka_uz import BASE
-from lavka_rejection_capture import sanitize_rejection
+from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.orders.rejection import sanitize_rejection
 
 # Preserve the existing shared quarantine; never silently switch guard databases.
 GUARD = Path.home() / '.local/share/yandex-lavka-mcp/fee-experiment-20261029.sqlite'
