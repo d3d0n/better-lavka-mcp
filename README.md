@@ -62,29 +62,31 @@ No browser automation, no cookie copy-paste: you sign in by scanning a QR code w
 
 ## Getting started
 
-You need [mise](https://mise.jdx.dev/getting-started.html) and a Unix-like system.
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/). Add this to your MCP client:
 
-**Once:**
+```json
+{
+  "mcpServers": {
+    "lavka": {
+      "command": "uvx",
+      "args": ["better-lavka-mcp"]
+    }
+  }
+}
+```
+
+Or with Claude Code: `claude mcp add lavka -- uvx better-lavka-mcp`.
+
+Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](docs/clients.md).
+
+**From source:**
 ```sh
 git clone https://github.com/d3d0n/better-lavka-mcp.git && cd better-lavka-mcp
 mise trust && mise install
 mise run install   # Python 3.12 + deps from uv.lock
 mise run test      # offline suite, no network, no money
 ```
-
-**Then plug it into your client:**
-```json
-{
-  "mcpServers": {
-    "lavka": {
-      "type": "stdio",
-      "command": "/absolute/path/to/better-lavka-mcp/.venv/bin/better-lavka-mcp"
-    }
-  }
-}
-```
-
-Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](docs/clients.md).
+Then point the client at `/absolute/path/to/better-lavka-mcp/.venv/bin/better-lavka-mcp`.
 
 Settings:
 
