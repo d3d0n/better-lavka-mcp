@@ -38,3 +38,37 @@ def test_uninstall_with_nothing_stored(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv('YANDEX_SESSION_FILE', raising=False)
     assert uninstall.run(['--yes']) == 0
     assert 'Nothing to delete' in capsys.readouterr().out
+
+
+def test_a_directory_in_yandex_session_file_is_never_deleted(data, tmp_path, monkeypatch, capsys):
+    state, _ = data
+    home = tmp_path / 'home'
+    (home / 'photos').mkdir(parents=True)
+    (home / 'photos' / 'cat.jpg').write_text('keep me')
+    monkeypatch.setenv('YANDEX_SESSION_FILE', str(home))
+    assert uninstall.run(['--yes']) == 0
+    assert (home / 'photos' / 'cat.jpg').read_text() == 'keep me'
+    assert not state.exists()
+    assert 'not a file' in capsys.readouterr().out
+
+
+def test_a_symlinked_session_file_removes_only_the_link(data, tmp_path, monkeypatch):
+    target = tmp_path / 'real-cookies.json'
+    target.write_text('keep me')
+    link = tmp_path / 'link.json'
+    link.symlink_to(target)
+    monkeypatch.setenv('YANDEX_SESSION_FILE', str(link))
+    assert uninstall.run(['--yes']) == 0
+    assert not link.is_symlink() and target.read_text() == 'keep me'
+
+
+def test_a_symlinked_data_folder_removes_only_the_link(tmp_path, monkeypatch):
+    elsewhere = tmp_path / 'elsewhere'
+    elsewhere.mkdir()
+    (elsewhere / 'important.txt').write_text('keep me')
+    link = tmp_path / 'yandex-lavka-mcp'
+    link.symlink_to(elsewhere, target_is_directory=True)
+    monkeypatch.setattr(uninstall, 'STATE_DIR', link)
+    monkeypatch.delenv('YANDEX_SESSION_FILE', raising=False)
+    assert uninstall.run(['--yes']) == 0
+    assert not link.is_symlink() and (elsewhere / 'important.txt').read_text() == 'keep me'
