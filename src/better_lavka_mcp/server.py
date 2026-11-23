@@ -343,7 +343,10 @@ mcp = FastMCP("Better Lavka", instructions=(
     "Grocery shopping in Yandex Lavka Uzbekistan. Usual flow: get_storefront_status shows whether the user is signed in "
     "(if not, start_login and poll get_login_status); use_address once (it is remembered); then search_products, "
     "add_to_cart (a whole list at once), repeat_order or the catalog; preview_order; and submit_order only after the user "
-    "agreed to the exact total. Every result says what to do next."))
+    "agreed to the exact total. Every result says what to do next. Ids in backticks are short three-word ids such as "
+    "`amber fox wave`: pass them exactly as shown wherever a product_id, order_id or category_id is asked."))
+
+from better_lavka_mcp.aliases import resolve
 
 
 def tool():
@@ -576,7 +579,7 @@ async def set_cart_quantity(product_id: str, quantity: int, longitude: float | N
     location = _location(longitude, latitude)
     async with create_http() as http:
         _, client = await _cart_client(http, location)
-        return _cart_view(await client.set_items({product_id: quantity}))
+        return _cart_view(await client.set_items({resolve(product_id): quantity}))
 
 
 class CartRequest(TypedDict, total=False):
@@ -601,7 +604,7 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
             quantity = request.get('quantity', 1)
             if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 50:
                 raise ValueError('Each quantity must be between 1 and 50')
-            product_id = request.get('product_id')
+            product_id = resolve(request.get('product_id'))
             if not product_id:
                 query = request.get('query')
                 if not isinstance(query, str) or not query.strip():
@@ -648,7 +651,7 @@ async def repeat_order(order_id: str = 'last', longitude: float | None = None, l
             if not history['orders']:
                 raise ValueError('There are no past orders yet')
             order_id = history['orders'][0]['order_id']
-        order = await lavka.order(order_id)
+        order = await lavka.order(resolve(order_id))
         wanted, titles = {}, {}
         for line in order['items']:
             wanted[line['product_id']] = wanted.get(line['product_id'], 0) + max(_quantity(line.get('quantity')), 1)
@@ -665,7 +668,7 @@ async def get_product(product_id: str, longitude: float | None = None, latitude:
     """Product card: price, pack size, availability, description, calories and protein/fat/carbs per 100 g, shelf life, brand and country."""
     location = _location(longitude, latitude)
     async with create_http() as http:
-        return await Lavka(http).product(product_id, location)
+        return await Lavka(http).product(resolve(product_id), location)
 
 
 @tool()
@@ -686,7 +689,7 @@ async def get_category_products(category_id: str, subcategory: str | None = None
         raise ValueError('limit must be between 1 and 100')
     location = _location(longitude, latitude)
     async with create_http() as http:
-        return await Lavka(http).category(category_id, location, subcategory, limit)
+        return await Lavka(http).category(resolve(category_id), location, subcategory, limit)
 
 
 @tool()
@@ -706,7 +709,7 @@ async def list_saved_cards(longitude: float | None = None, latitude: float | Non
 async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
     """Past orders, newest first, with their items, total and address. For the next page pass next_older_than as older_than. limit is 1–21."""
     async with create_http() as http:
-        return await Lavka(http).order_history(limit, older_than)
+        return await Lavka(http).order_history(limit, None if older_than is None else resolve(older_than))
 
 
 @tool()
@@ -714,7 +717,7 @@ async def list_order_history(limit: int = 21, older_than: str | None = None) -> 
 async def get_order(order_id: str) -> dict:
     """One past order in full: items, products, delivery, service fee, discount, total, address and status."""
     async with create_http() as http:
-        return await Lavka(http).order(order_id)
+        return await Lavka(http).order(resolve(order_id))
 
 
 @tool()
@@ -724,7 +727,7 @@ async def get_payment_status(order_id: str) -> dict:
     from better_lavka_mcp.payment import payment_status
     async with create_http() as http:
         props = await Lavka(http).bootstrap()
-        return await payment_status(http, props, order_id)
+        return await payment_status(http, props, resolve(order_id))
 
 
 @tool()
@@ -827,7 +830,7 @@ async def cancel_order(order_id: str, explicit_confirmation: bool) -> dict:
     async with create_http() as http:
         async def history():
             return await Lavka(http).order_history()
-        return await cancel(http, order_id, explicit_confirmation, history)
+        return await cancel(http, resolve(order_id), explicit_confirmation, history)
 
 
 from better_lavka_mcp.auth.tools import register_qr_tools

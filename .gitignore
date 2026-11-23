@@ -33,6 +33,7 @@
 !/src/better_lavka_mcp/constants.py
 !/src/better_lavka_mcp/errors.py
 !/src/better_lavka_mcp/payment.py
+!/src/better_lavka_mcp/aliases.py
 !/src/better_lavka_mcp/preferences.py
 !/src/better_lavka_mcp/region.py
 !/src/better_lavka_mcp/render.py

@@ -93,7 +93,9 @@ Settings:
 
 - `YANDEX_LAVKA_REGION` — startup country: `UZ` (default), `RU` or `KZ`. `select_country` changes it for this process only.
 - `YANDEX_SESSION_FILE` — where the session cookies live.
-- `BETTER_LAVKA_MCP_OUTPUT=json` — tools return raw JSON instead of the default short text. The text says what happened, lists the data with ids, and tells the assistant what to do next; JSON is handy for scripts and debugging.
+- `BETTER_LAVKA_MCP_OUTPUT=json` — tools return raw JSON instead of the default short text. The text says what happened, lists the data, and tells the assistant what to do next; JSON is handy for scripts and debugging.
+
+Products, orders and categories show up as short ids like `amber fox wave` instead of 44-character hex — about 5 tokens instead of 23. The same product always gets the same words, and tools accept either form.
 
 ---
 

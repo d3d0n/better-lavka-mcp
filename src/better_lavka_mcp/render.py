@@ -6,9 +6,16 @@ import json
 import os
 from decimal import Decimal, InvalidOperation
 
+from better_lavka_mcp import aliases
+
 
 def json_output():
     return os.environ.get('BETTER_LAVKA_MCP_OUTPUT', 'text').strip().lower() == 'json'
+
+
+def ref(real_id):
+    """A short id in backticks; tools accept it wherever the real id goes."""
+    return f'`{aliases.short(real_id)}`'
 
 
 def money(value, currency='сум'):
@@ -26,7 +33,7 @@ def _product(p, price_key='price_uzs', currency='сум'):
         parts.append(str(p['pack']))
     if p.get('available') is False:
         parts.append('not available now')
-    return f"- {p.get('title')} — {', '.join(parts)} · `{p.get('id') or p.get('product_id')}`"
+    return f"- {p.get('title')} — {', '.join(parts)} · {ref(p.get('id') or p.get('product_id'))}"
 
 
 def _cart_lines(cart):
@@ -36,7 +43,7 @@ def _cart_lines(cart):
     lines = [f"**Cart** ({len(items)} item{'s' if len(items) != 1 else ''}):"]
     for item in items:
         note = '' if item.get('available', True) else ' — not available now'
-        lines.append(f"- {item['title']} ×{item['quantity']} — {money(item.get('price_uzs'))} each{note} · `{item['id']}`")
+        lines.append(f"- {item['title']} ×{item['quantity']} — {money(item.get('price_uzs'))} each{note} · {ref(item['id'])}")
     total = f"Total **{money(cart.get('total_uzs'))}** incl. delivery {money(cart.get('delivery_uzs'))}"
     if cart.get('eta'):
         total += f" · arrives in {cart['eta']}"
@@ -81,7 +88,7 @@ def _add(r):
     lines = []
     if r.get('order'):
         o = r['order']
-        lines.append(f"Repeating order {o['order_id']} from {(o.get('created_at') or '')[:10]} (was {money(o.get('total_uzs'))}). Prices are today's.")
+        lines.append(f"Repeating order {ref(o['order_id'])} from {(o.get('created_at') or '')[:10]} (was {money(o.get('total_uzs'))}). Prices are today's.")
     lines += _additions(r)
     lines.append('')
     lines += _cart_lines(r['cart'])
@@ -132,7 +139,7 @@ def _product_card(r):
     if r.get('description'):
         lines.append(r['description'])
     lines += [f'{k}: {v}' for k, v in (r.get('details') or {}).items()]
-    lines.append(f"Next: add_to_cart with product_id `{r['id']}`.")
+    lines.append(f"Next: add_to_cart with product_id {ref(r['id'])}.")
     return '\n'.join(lines)
 
 
@@ -140,7 +147,7 @@ def _categories(r):
     lines = ['Catalog (call get_category_products with a category id):']
     for g in r['groups']:
         lines.append(f"**{g['title']}**")
-        lines += [f"- {c['title']} · `{c['category_id']}`" for c in g['categories']]
+        lines += [f"- {c['title']} · {ref(c['category_id'])}" for c in g['categories']]
     return '\n'.join(lines)
 
 
@@ -169,18 +176,18 @@ def _history(r):
     lines = []
     for o in r['orders']:
         lines.append(f"**{(o.get('created_at') or '')[:10]}** — {o.get('status_text') or o.get('status')}, {money(o.get('total_uzs'))}"
-                     f" · {o.get('address') or ''} · `{o['order_id']}`")
+                     f" · {o.get('address') or ''} · {ref(o['order_id'])}")
         lines += [f"  - {i['name']} ×{i['quantity']} — {money(i.get('price_uzs'))}" for i in o['items']]
     lines.append('Next: repeat_order with an order id puts it back in the cart; get_order shows fees.')
     if r.get('next_older_than'):
-        lines.append(f"More: list_order_history(older_than=\"{r['next_older_than']}\").")
+        lines.append(f"More: list_order_history(older_than=\"{aliases.short(r['next_older_than'])}\").")
     return '\n'.join(lines)
 
 
 def _order(r):
-    lines = [f"Order `{r['order_id']}` · {(r.get('created_at') or '')[:16].replace('T', ' ')} · {r.get('status_text') or r.get('status')}",
+    lines = [f"Order {ref(r['order_id'])} · {(r.get('created_at') or '')[:16].replace('T', ' ')} · {r.get('status_text') or r.get('status')}",
              f"Delivered to: {r.get('address')}"]
-    lines += [f"- {i['name']} ×{i['quantity']} — {money(i.get('price_uzs'))} · `{i['product_id']}`" for i in r['items']]
+    lines += [f"- {i['name']} ×{i['quantity']} — {money(i.get('price_uzs'))} · {ref(i['product_id'])}" for i in r['items']]
     lines.append(f"Products {money(r.get('products_uzs'))} + delivery {money(r.get('delivery_uzs'))} + service fee {money(r.get('service_fee_uzs'))}"
                  f" − discount {money(r.get('discount_uzs'))} = **{money(r.get('total_uzs'))}**")
     lines.append('Next: repeat_order with this id to order it again.')
@@ -219,7 +226,7 @@ def _clean(text):
 def _submit(r):
     outcome = r.get('outcome')
     if outcome == 'submitted':
-        lines = [f"**Order placed** · `{r['order_id']}`."]
+        lines = [f"**Order placed** · {ref(r['order_id'])}."]
         lines.append(_payment(r))
         lines.append('Next: list_active_orders while it is on the way; cancel_order if the user changes their mind.')
         return '\n'.join(lines)
@@ -305,4 +312,6 @@ def render(tool, result):
     """Text for the model, or JSON when BETTER_LAVKA_MCP_OUTPUT=json."""
     if json_output():
         return json.dumps(result, ensure_ascii=False, indent=2)
-    return RENDERERS[tool](result)
+    text = RENDERERS[tool](result)
+    aliases.save()
+    return text
