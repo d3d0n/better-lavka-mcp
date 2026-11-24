@@ -477,3 +477,12 @@ async def test_submit_places_only_this_conversations_preview(tmp_path, monkeypat
         assert "Order placed" in placed.content[0].text and len(posts) == 1
         again = await chat_a.call_tool("submit_order", args)  # the preview is used up
         assert again.isError and len(posts) == 1
+        # A newer preview that fails (here: no card chosen among two) drops the older one.
+        await chat_a.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "1234"})
+        async def two_cards(*args, **kwargs):
+            raise ValueError("Card suffix is missing or ambiguous")
+        monkeypatch.setattr(orders, "snapshot", two_cards)
+        failed = await chat_a.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "9999"})
+        assert failed.isError
+        stale = await chat_a.call_tool("submit_order", args)
+        assert stale.isError and "No order preview in this conversation" in stale.content[0].text and len(posts) == 1

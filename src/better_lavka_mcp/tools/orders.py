@@ -74,6 +74,14 @@ def _remember_preview(ctx, token):
         _PREVIEWS[key] = token
 
 
+def _forget_preview(ctx):
+    key = _conversation(ctx)
+    if key is _NO_SESSION:
+        _DIRECT_PREVIEW.pop('token', None)
+    else:
+        _PREVIEWS.pop(key, None)
+
+
 def _take_preview(ctx):
     key = _conversation(ctx)
     token = _DIRECT_PREVIEW.pop('token', None) if key is _NO_SESSION else _PREVIEWS.pop(key, None)
@@ -88,6 +96,9 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
     """Show the order before paying: address, items, total UZS and card; submit_order then places exactly this preview within five minutes. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing; puts the card on the Lavka cart as its checkout page does, and if Lavka repriced items since they were added, re-saves them at the new price and lists the changes."""
     from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
+    # A new preview replaces the old one even when it fails or asks for a card: the user is
+    # no longer looking at the old terms, so submit_order must not place them.
+    _forget_preview(ctx)
     chosen_card = card_last4
     expected_address_id = None
     async with client.create_http() as http:

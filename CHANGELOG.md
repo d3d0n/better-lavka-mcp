@@ -4,6 +4,14 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.10.1] — 2026-11-24
+
+### Fixed
+- A new `preview_order` drops the conversation's previous preview even when it fails or asks which card to use, so `submit_order` can't place terms the user is no longer looking at.
+
+### Changed
+- CI tests run on branch pushes and pull requests, not again on release tags; macOS runs nightly and on demand, since its runners queued for up to ten minutes for a test run of seconds.
+
 ## [0.10.0] — 2026-11-24
 
 ### Changed
@@ -191,7 +199,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...v0.8.3
