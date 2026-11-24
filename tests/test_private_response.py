@@ -1,8 +1,9 @@
 import asyncio
-import os
 import stat
+
 import httpx
 import pytest
+
 from better_lavka_mcp.orders.guard import AttemptGuard, submit_once
 
 

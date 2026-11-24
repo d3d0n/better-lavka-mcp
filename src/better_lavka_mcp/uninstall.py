@@ -9,7 +9,9 @@ import shutil
 import sys
 from pathlib import Path
 
-STATE_DIR = Path.home() / '.local/share/yandex-lavka-mcp'
+from better_lavka_mcp import paths
+
+STATE_DIR = paths.data_dir()
 
 
 def targets():

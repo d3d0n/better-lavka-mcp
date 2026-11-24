@@ -2,7 +2,8 @@ import json
 
 import httpx
 import pytest
-from better_lavka_mcp.server import Lavka
+
+from better_lavka_mcp.client import Lavka
 
 # Synthetic order-log entry shaped like a live lavka.yandex.uz response (2026-11).
 ORDER = {
@@ -51,11 +52,12 @@ async def test_get_order_reads_one_order_with_fees():
 
 @pytest.mark.asyncio
 async def test_mcp_history_tool_delegates_to_authenticated_client(monkeypatch):
-    from better_lavka_mcp import server
+    from better_lavka_mcp import client
+    from better_lavka_mcp.tools import account
     async def fake_history(self, count, older_than):
         return {"orders": [], "count": count, "cursor": older_than}
-    monkeypatch.setattr(server.Lavka, "order_history", fake_history)
-    result = await server.list_order_history(5, None)
+    monkeypatch.setattr(client.Lavka, "order_history", fake_history)
+    result = await account.list_order_history(5, None)
     assert result == {"orders": [], "count": 5, "cursor": None}
 
 

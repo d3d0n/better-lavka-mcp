@@ -8,5 +8,5 @@ def main():
         # Before importing the server, which creates its data folder.
         from better_lavka_mcp.uninstall import run
         sys.exit(run(sys.argv[2:]))
-    from better_lavka_mcp.server import mcp
+    from better_lavka_mcp.app import mcp
     mcp.run(transport='stdio')

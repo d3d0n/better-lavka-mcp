@@ -1,7 +1,9 @@
 import asyncio
+
 import httpx
 import pytest
-from better_lavka_mcp.orders.guard import submit_once, AttemptGuard, AttemptBlocked
+
+from better_lavka_mcp.orders.guard import AttemptBlocked, AttemptGuard, submit_once
 
 
 def test_durable_guard_blocks_second_submission_across_instances(tmp_path):

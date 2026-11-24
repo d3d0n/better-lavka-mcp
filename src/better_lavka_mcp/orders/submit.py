@@ -9,17 +9,19 @@ import stat
 import time
 from pathlib import Path
 
+from better_lavka_mcp import paths
 from better_lavka_mcp.cart import CartClient
+from better_lavka_mcp.client import Lavka
 from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.orders.cancel import cancel_order as cancel_once
 from better_lavka_mcp.orders.guard import GUARD, AttemptBlocked, AttemptGuard
 from better_lavka_mcp.orders.payload import build_provider_payload
 from better_lavka_mcp.orders.rejection import sanitize_rejection, sanitize_upstream_error
 from better_lavka_mcp.payment import PaymentClient
-from better_lavka_mcp.server import Lavka, UpstreamError
 
-STATE = Path.home() / '.local/share/yandex-lavka-mcp/order-previews.sqlite'
-CANCEL_STATE = Path.home() / '.local/share/yandex-lavka-mcp/cancellation.sqlite'
+STATE = paths.data_dir() / 'order-previews.sqlite'
+CANCEL_STATE = paths.data_dir() / 'cancellation.sqlite'
 POSITION_FIELDS = ('location','placeId','country','city','street','house','depotId','floor','flat','comment','entrance','doorcode','buildingName','doorbellName','leftAtDoor','meetOutside','noDoorCall')
 WARNING = ('Client-side preflight only: server-side total enforcement and idempotency are not established. '
            'Prices may change after preflight. No automatic retry; inspect official order history and bank on uncertainty. '
@@ -27,7 +29,7 @@ WARNING = ('Client-side preflight only: server-side total enforcement and idempo
 
 
 def _ensure_default_state_dir(path):
-    directory = Path.home() / '.local/share/yandex-lavka-mcp'
+    directory = paths.data_dir()
     if Path(path).parent != directory:
         return
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -85,7 +87,7 @@ async def snapshot(http, address_index, suffix):
     loc = address.get('location')
     if not isinstance(loc, list) or len(loc) != 2:
         raise ValueError('Saved address has no usable location')
-    props = client.props
+    props = client.props or {}
     headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
                'X-Csrf-Token': props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
     response = await http.get(BASE + '/api/v1/providers/v2/service-info', headers=headers,
@@ -285,6 +287,7 @@ PAYMENT_POLL_INTERVAL = 2.0
 async def _await_payment(http, props, order_id):
     """Poll payment status briefly after submit; never resubmits and never raises."""
     import asyncio
+
     from better_lavka_mcp.payment import TERMINAL_PAYMENT_STATUSES, payment_status
     last = {'payment_status': 'unknown', 'redirect_url': None}
     for attempt in range(PAYMENT_POLL_ATTEMPTS):

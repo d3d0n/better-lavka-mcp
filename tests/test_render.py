@@ -4,21 +4,21 @@ import json
 import httpx
 import pytest
 
-from better_lavka_mcp import aliases, render, server
 import test_shopping_tools as shop
+from better_lavka_mcp import aliases, app, client, render
 
 
 @pytest.fixture
 def lavka(monkeypatch):
     fake = shop.FakeLavka()
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
-    monkeypatch.setattr(server, '_delivery', {'address_id': 'a-home', 'location': shop.HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
+    monkeypatch.setattr(app, '_delivery', {'address_id': 'a-home', 'location': shop.HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
     monkeypatch.delenv('BETTER_LAVKA_MCP_OUTPUT', raising=False)
     return fake
 
 
 async def text_of(tool, args):
-    content = await server.mcp.call_tool(tool, args)
+    content = await app.mcp.call_tool(tool, args)
     content = content[0] if isinstance(content, tuple) else content
     return '\n'.join(c.text for c in content if c.type == 'text')
 
@@ -134,6 +134,6 @@ async def test_address_search_uses_suggest_search(lavka, monkeypatch):
                 {'title': 'улица Амира Темура, 1', 'label': 'Ташкент', 'position': [69.28, 41.33]},
                 {'title': 'no point', 'label': 'x'}]})
         return lavka.handle(request)
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     text = await text_of('search_addresses', {'query': 'Amir Temur 1'})
     assert '- улица Амира Темура, 1, Ташкент — longitude 69.28, latitude 41.33' in text and 'no point' not in text

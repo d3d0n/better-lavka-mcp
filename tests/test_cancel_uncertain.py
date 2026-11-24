@@ -1,7 +1,9 @@
 import asyncio
+
 import httpx
 import pytest
-from better_lavka_mcp.orders.cancel import cancel_order, CancellationBlocked
+
+from better_lavka_mcp.orders.cancel import CancellationBlocked, cancel_order
 
 
 def test_uncertain_attempt_blocks_same_order_but_not_different_order(tmp_path):

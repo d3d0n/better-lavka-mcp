@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
 
+
 @dataclass
 class PaymentResults:
     masked_cards: list[str]
@@ -82,6 +83,7 @@ async def payment_status(http, props, order_id):
         raise UpstreamError('Payment status returned non-JSON') from None
     if not isinstance(data, dict) or not isinstance(data.get('status'), str):
         raise UpstreamError('Unexpected payment status response')
-    payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
+    payload = data.get('payload')
+    payload = payload if isinstance(payload, dict) else {}
     redirect = payload.get('redirectUrl') or data.get('redirectUrl')
     return {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None}

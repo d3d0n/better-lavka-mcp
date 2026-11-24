@@ -5,7 +5,8 @@ import time
 
 import httpx
 import pytest
-from better_lavka_mcp.orders.guard import AttemptGuard, AttemptBlocked, submit_once
+
+from better_lavka_mcp.orders.guard import AttemptBlocked, AttemptGuard, submit_once
 
 
 def evidence():

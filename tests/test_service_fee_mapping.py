@@ -1,5 +1,6 @@
 """Synthetic, network-free regression tests for the proposed UZ fee bridge."""
 import copy
+
 import pytest
 
 from better_lavka_mcp.orders.payload import build_provider_payload

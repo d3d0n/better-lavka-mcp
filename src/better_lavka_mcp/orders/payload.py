@@ -5,7 +5,6 @@ Not a verified server contract or a safe checkout gate. Never transmits a reques
 import json
 import math
 
-
 OPTIONAL_FIELDS = frozenset({"secondaryPaymentMethod", "cashback", "serviceFee",
     "timeslot", "useRover", "giftByPhone", "charity", "useNotVerifiedPhone",
     "commentForPicker", "dispatchPassParams"})
@@ -36,7 +35,7 @@ def build_provider_payload(*, cart_id, cart_version, flow_version, position,
         if not text(payment_type) or not text(payment_id):
             raise ValueError("Selected legacy payment type and ID are required")
         payment = {"paymentMethodType": payment_type,
-                   "paymentMethodId": {"sbp": "sbp_qr", "sbp_bind_token": "sbp_bind_token"}.get(payment_type, payment_id)}
+                   "paymentMethodId": {"sbp": "sbp_qr", "sbp_bind_token": "sbp_bind_token"}.get(str(payment_type), payment_id)}
     else:
         if payment_type is not None or payment_id is not None or not isinstance(payment_method, dict) or not payment_method:
             raise ValueError("Provide exactly one selected payment branch")

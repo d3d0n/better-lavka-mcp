@@ -1,7 +1,11 @@
 import json
+
 import httpx
 import pytest
-from better_lavka_mcp import server
+
+from better_lavka_mcp import client
+from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.tools import account
 
 
 @pytest.mark.asyncio
@@ -16,8 +20,8 @@ async def test_list_active_orders_reads_authenticated_verified_empty_array(monke
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         assert request.url.path == '/api/v1/providers/orders-tracking/v1/tracked-orders'
         return httpx.Response(200, json=[])
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    result = await server.list_active_orders()
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    result = await account.list_active_orders()
     assert result['active_order_count'] == 0
     assert result['history_complete'] is False
     assert result['reconciles_uncertain_submission'] is False
@@ -34,9 +38,9 @@ async def test_list_active_orders_rejects_unauthenticated_or_unverified_shapes(m
             props = {'pageData': {'passportInfo': {'status': status}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         return httpx.Response(200, json=data)
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    with pytest.raises(server.UpstreamError) as exc:
-        await server.list_active_orders()
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    with pytest.raises(UpstreamError) as exc:
+        await account.list_active_orders()
     assert 'secret' not in str(exc.value)
 
 
@@ -49,8 +53,8 @@ async def test_nonempty_tracking_feed_exposes_only_entry_count(monkeypatch):
             props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         return httpx.Response(200, json=[{'id': 'secret'}])
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
-    result = await server.list_active_orders()
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    result = await account.list_active_orders()
     assert result['feed_entry_count'] == 1
     assert result['active_order_count'] is None
     assert result['reconciles_uncertain_submission'] is False

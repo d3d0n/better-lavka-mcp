@@ -4,8 +4,10 @@ import json
 import httpx
 import pytest
 
-from better_lavka_mcp import server
+from better_lavka_mcp import app, client
 from better_lavka_mcp.orders import submit as orders
+from better_lavka_mcp.tools import account, cart, catalog
+from better_lavka_mcp.tools import orders as order_tools
 
 HOME = [69.2, 41.3]
 # id -> (title as Lavka sends it, current price, unavailable on depot, quantity limit)
@@ -100,15 +102,15 @@ class FakeLavka:
 @pytest.fixture
 def lavka(monkeypatch):
     fake = FakeLavka()
-    monkeypatch.setattr(server, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
-    monkeypatch.setattr(server, '_delivery', {'address_id': 'a-home', 'location': HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
+    monkeypatch.setattr(app, '_delivery', {'address_id': 'a-home', 'location': HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
     return fake
 
 
 @pytest.mark.asyncio
 async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
     lavka.cart = {'eggs': 1}
-    result = await server.add_to_cart([{'query': 'молоко', 'quantity': 2}, {'query': 'хлеб'}, {'query': 'каймак', 'quantity': 4},
+    result = await cart.add_to_cart([{'query': 'молоко', 'quantity': 2}, {'query': 'хлеб'}, {'query': 'каймак', 'quantity': 4},
                                        {'query': 'ананас'}, {'product_id': 'eggs'}, {'query': 'йогурт', 'quantity': 3},
                                        {'query': 'сметана'}])
     # Never bought: "йогурт" has two matches, so nothing is added for it; "сметана" has one, so it is.
@@ -126,7 +128,7 @@ async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
 
 @pytest.mark.asyncio
 async def test_repeat_last_order_drops_what_the_store_cannot_sell(lavka):
-    result = await server.repeat_order()
+    result = await cart.repeat_order()
     assert lavka.updates == [{'milk': 2, 'bread': 1, 'kaymak': 5}, {'bread': 0, 'kaymak': 3}]
     assert result['order'] == {'order_id': 'order-1', 'created_at': '2026-01-01T09:00:00+00:00', 'total_uzs': '99000'}
     assert result['unavailable'] == ['Хлеб'] and result['limited'][0]['max'] == 3
@@ -136,7 +138,7 @@ async def test_repeat_last_order_drops_what_the_store_cannot_sell(lavka):
 
 @pytest.mark.asyncio
 async def test_set_cart_quantity_needs_no_price_or_coordinates(lavka):
-    result = await server.set_cart_quantity('milk', 3)
+    result = await cart.set_cart_quantity('milk', 3)
     assert lavka.updates == [{'milk': 3}]
     assert result['items'][0] == {'id': 'milk', 'title': 'Молоко Example 2,5%', 'quantity': '3', 'price_uzs': '15990', 'pack': '1 шт', 'available': True}
     assert (result['delivery_uzs'], result['eta']) == ('10', '15 мин')
@@ -144,7 +146,7 @@ async def test_set_cart_quantity_needs_no_price_or_coordinates(lavka):
 
 @pytest.mark.asyncio
 async def test_get_product_parses_nutrition_and_details(lavka):
-    product = await server.get_product('potato')
+    product = await catalog.get_product('potato')
     assert product['title'] == 'Картофель' and product['pack'] == '800 г'
     assert product['nutrition_per_100g'] == {'kcal': 77.0, 'protein': 2.0, 'fat': 0.4, 'carbs': 16.3}
     assert product['details'] == {'Срок годности': '15 д.', 'Страна': 'Узбекистан'}
@@ -152,7 +154,7 @@ async def test_get_product_parses_nutrition_and_details(lavka):
 
 @pytest.mark.asyncio
 async def test_payment_status_returns_3ds_link(lavka):
-    assert await server.get_payment_status('order-1') == {'payment_status': 'wait_user_action', 'redirect_url': 'https://trust.example/3ds'}
+    assert await account.get_payment_status('order-1') == {'payment_status': 'wait_user_action', 'redirect_url': 'https://trust.example/3ds'}
 
 
 @pytest.mark.asyncio
@@ -170,7 +172,7 @@ async def test_preview_order_defaults_to_session_address_and_only_card(lavka, mo
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
-    assert await server.preview_order() == {'index': 1, 'suffix': '4242'}
+    assert await order_tools.preview_order() == {'index': 1, 'suffix': '4242'}
     assert seen['location'] == HOME
 
 
@@ -188,22 +190,22 @@ async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
-    asked = await server.preview_order()
+    asked = await order_tools.preview_order()
     assert asked['preview'] is False and asked['cards'] == ['**** 1111', '**** 2222']
-    assert await server.preview_order(card_last4='2222') == {'suffix': '2222'}
-    assert await server.preview_order() == {'suffix': '2222'}
+    assert await order_tools.preview_order(card_last4='2222') == {'suffix': '2222'}
+    assert await order_tools.preview_order() == {'suffix': '2222'}
 
 
 @pytest.mark.asyncio
 async def test_catalog_lists_categories_and_browses_shelves(lavka):
-    groups = (await server.list_categories())['groups']
+    groups = (await catalog.list_categories())['groups']
     assert groups == [{'group_id': 'g-dairy', 'title': 'Молочный прилавок',
                        'categories': [{'category_id': 'c-milk', 'title': 'Молоко, масло и яйца'}]}]
-    shelf = await server.get_category_products('c-milk')
+    shelf = await catalog.get_category_products('c-milk')
     assert shelf['subcategories'] == [{'title': 'Свежее молоко', 'count': 2}, {'title': 'Яйца', 'count': 1}]
     assert [(p['title'], p['subcategory']) for p in shelf['products']] == [
         ('Молоко Example 2,5%', 'Свежее молоко'), ('Молоко овсяное', 'Свежее молоко'), ('Яйца', 'Яйца')]
-    eggs = await server.get_category_products('c-milk', subcategory='яйца', limit=5)
+    eggs = await catalog.get_category_products('c-milk', subcategory='яйца', limit=5)
     assert [p['id'] for p in eggs['products']] == ['eggs'] and eggs['total'] == 1
     with pytest.raises(ValueError, match='list_categories'):
-        await server.get_category_products('c-closed')
+        await catalog.get_category_products('c-closed')

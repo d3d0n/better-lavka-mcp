@@ -3,13 +3,13 @@
 The request path is named by the storefront frontend; its Uzbekistan response
 format remains unverified. Never use an empty result to clear an uncertain order.
 """
+import asyncio
 import logging
 import os
 import re
-import asyncio
 
+from better_lavka_mcp.client import Lavka, create_http
 from better_lavka_mcp.constants import BASE
-from better_lavka_mcp.server import Lavka, create_http
 
 
 class ObservationError(Exception):

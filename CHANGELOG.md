@@ -6,10 +6,16 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ### Added
 - Product cards show ingredients from the ingredients block and the per-order limit.
-- Logo, issue forms, and this changelog.
+- Logo, issue forms, this changelog, and GitHub Releases created from it on every tag.
+- Windows: data lives in `%LOCALAPPDATA%\better-lavka-mcp`.
+- CI runs on Linux and macOS and checks the code with ruff and pyright (`mise run lint`).
+
+### Changed
+- The server code is split into `app.py`, `client.py` and `tools/` by area instead of one large module.
 
 ### Removed
 - `requirements.txt`: dependencies live in `pyproject.toml`.
+- An unused offline checkout prototype.
 
 ## [0.5.3] — 2026-11-24
 

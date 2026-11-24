@@ -8,8 +8,7 @@ import httpx
 import pytest
 
 from better_lavka_mcp.cart import CartClient
-from better_lavka_mcp.server import UpstreamError
-
+from better_lavka_mcp.errors import UpstreamError
 
 PROPS = {"pageData": {"passportInfo": {"status": "VALID"}}}
 LOCATION = [69.1, 41.3]

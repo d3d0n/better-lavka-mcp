@@ -16,6 +16,11 @@ class QRLogin:
         self.started = None
         self.original = None
 
+    async def _verify(self, path):
+        if self.verify is None:
+            raise RuntimeError('No session verifier configured')
+        return await self.verify(path)
+
     def _fingerprint(self):
         try:
             return hashlib.sha256(self.session.read_bytes()).digest()
@@ -46,7 +51,7 @@ class QRLogin:
                 if not self.session.exists():
                     return {'status': 'login_required'}
                 try:
-                    valid = await self.verify(self.session)
+                    valid = await self._verify(self.session)
                 except Exception:
                     return {'status': 'verification_unavailable'}
                 return {'status': 'authenticated' if valid else 'login_required'}
@@ -59,7 +64,7 @@ class QRLogin:
                 if result['status'] == 'pending':
                     return {'status': 'pending'}
                 staged = self.manager.session_path
-                if not await self.verify(staged):
+                if not await self._verify(staged):
                     return {'status': 'verification_failed'}
                 if self._fingerprint() != self.original:
                     return {'status': 'session_changed', 'note': 'Existing session was not replaced.'}
@@ -86,9 +91,11 @@ class QRLogin:
 
 def register_qr_tools(mcp, session_path, guard=None):
     """Register once on a trusted, local stdio server; QR file is owner-only."""
-    from http.cookiejar import Cookie
     import json
+    from http.cookiejar import Cookie
+
     import httpx
+
     from better_lavka_mcp.auth.runtime import QRManager
 
     if guard is None:
@@ -102,7 +109,7 @@ def register_qr_tools(mcp, session_path, guard=None):
     manager = QRManager(session.parent / ('.qr-session-' + suffix), session.parent / ('.qr-image-' + suffix + '.png'))
 
     async def verify(path):
-        from better_lavka_mcp.server import Lavka
+        from better_lavka_mcp.client import Lavka
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             data = json.loads(path.read_text())
             for item in data['cookies']:
@@ -123,11 +130,12 @@ def register_qr_tools(mcp, session_path, guard=None):
     @guard
     async def start_login(replace_existing_session: bool = False):
         """Sign in to Lavka: returns a QR code to scan in the Yandex app and a short-lived link to open on the phone instead. Both are login keys: show them only to the user. replace_existing_session=true switches accounts and needs the user's approval."""
-        from mcp.types import TextContent, ImageContent
         import base64
+
+        from mcp.types import ImageContent, TextContent
         result = await login.start(replace_existing_session)
         image_path = result.pop('qr_image', None)
-        content = [TextContent(type='text', text=as_text('start_login', result))]
+        content: list[TextContent | ImageContent] = [TextContent(type='text', text=as_text('start_login', result))]
         if image_path:
             try:
                 image = Path(image_path).read_bytes()

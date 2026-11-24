@@ -1,12 +1,16 @@
 import json
+
 import httpx
 import pytest
-from better_lavka_mcp import server
+
+from better_lavka_mcp import app, client
 from better_lavka_mcp.orders import submit as orders
+from better_lavka_mcp.orders.cancel import CancellationBlocked
+
 
 @pytest.mark.asyncio
 async def test_order_tools_are_exposed():
-    names = {tool.name for tool in await server.mcp.list_tools()}
+    names = {tool.name for tool in await app.mcp.list_tools()}
     assert {'preview_order', 'submit_order', 'cancel_order', 'list_saved_addresses'} <= names
 
 @pytest.mark.asyncio
@@ -31,7 +35,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
             return httpx.Response(200,json={'status':'wait_user_action','payload':{'redirectUrl':'https://trust.example/3ds'}})
         raise AssertionError(path)
     async def boot(self): self.props=props; return props
-    monkeypatch.setattr(server.Lavka,'bootstrap',boot)
+    monkeypatch.setattr(client.Lavka,'bootstrap',boot)
     monkeypatch.setattr(orders,'GUARD',tmp_path/'guard')
     monkeypatch.setattr(orders,'STATE',tmp_path/'previews')
     monkeypatch.setattr(orders,'CANCEL_STATE',tmp_path/'cancel')
@@ -42,7 +46,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         result=await orders.submit(http,preview['preview_token'],'100',True)
         assert result['order_id']=='o1'
         assert result['payment_status']=='wait_user_action' and result['redirect_url']=='https://trust.example/3ds'
-        with pytest.raises(Exception): await orders.submit(http,preview['preview_token'],'100',True)
+        with pytest.raises(ValueError, match='consumed'): await orders.submit(http,preview['preview_token'],'100',True)
         async def history(): return {'orders':[{'order_id':'o1','status':'cancelled'}]}
         result=await orders.cancel(http,'o1',True,history)
         assert result['refund_status']=='unknown'
@@ -93,7 +97,7 @@ async def test_cancel_timeout_never_retries(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, 'CANCEL_STATE', tmp_path/'cancel')
     async def boot(self):
         self.props={'pageData':{'passportInfo':{'status':'VALID'}}}; return self.props
-    monkeypatch.setattr(server.Lavka,'bootstrap',boot)
+    monkeypatch.setattr(client.Lavka,'bootstrap',boot)
     calls=[]
     def handle(request):
         calls.append(request.url.path)
@@ -101,7 +105,7 @@ async def test_cancel_timeout_never_retries(tmp_path, monkeypatch):
     async def history(): raise RuntimeError('history unavailable')
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         assert (await orders.cancel(http,'o1',True,history))['outcome']=='unknown'
-        with pytest.raises(Exception): await orders.cancel(http,'o1',True,history)
+        with pytest.raises(CancellationBlocked, match='already attempted'): await orders.cancel(http,'o1',True,history)
     assert calls==['/api/v1/providers/orders/v1/cancel']
 
 @pytest.mark.asyncio
@@ -170,11 +174,12 @@ def test_unknown_reconciliation_requires_acknowledgement_and_audit(tmp_path, mon
 
 @pytest.mark.asyncio
 async def test_reconciliation_tool_exposed():
-    assert "reconcile_order_attempt" in {tool.name for tool in await server.mcp.list_tools()}
+    assert "reconcile_order_attempt" in {tool.name for tool in await app.mcp.list_tools()}
 
 
 def test_prior_known_rejection_released_without_bank_claim(tmp_path, monkeypatch):
     import sqlite3
+
     from better_lavka_mcp.orders.guard import AttemptGuard
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     guard = AttemptGuard(orders.GUARD)

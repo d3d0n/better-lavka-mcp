@@ -4,7 +4,7 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from better_lavka_mcp.server import UpstreamError
+from better_lavka_mcp.errors import UpstreamError
 
 
 @pytest.mark.asyncio

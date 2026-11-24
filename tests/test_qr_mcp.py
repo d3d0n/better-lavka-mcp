@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_start_hides_qr_link_and_prevents_existing_session_replacement(tmp_path):
     from better_lavka_mcp.auth.tools import QRLogin
@@ -67,6 +68,7 @@ async def test_concurrent_session_change_is_not_overwritten(tmp_path):
 @pytest.mark.asyncio
 async def test_registered_tools_are_discoverable(tmp_path):
     from mcp.server.fastmcp import FastMCP
+
     from better_lavka_mcp.auth.tools import register_qr_tools
     server = FastMCP('test')
     register_qr_tools(server, tmp_path / 'session')

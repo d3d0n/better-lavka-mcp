@@ -1,14 +1,16 @@
 """Single-process QR login manager; no account or checkout writes."""
 import asyncio
-from pathlib import Path
-
-import httpx
-from better_lavka_mcp.auth import qr as qr_auth
-from better_lavka_mcp.errors import UpstreamError
 
 # HTTPX's default INFO logger includes full URLs. QR URL query strings are
 # temporary login capabilities, so never emit them through this client.
 import logging
+from pathlib import Path
+
+import httpx
+
+from better_lavka_mcp.auth import qr as qr_auth
+from better_lavka_mcp.errors import UpstreamError
+
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 

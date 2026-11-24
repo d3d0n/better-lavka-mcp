@@ -224,7 +224,7 @@ def _preview(r):
 
 
 def _clean(text):
-    from better_lavka_mcp.server import clean_text
+    from better_lavka_mcp.client import clean_text
     return clean_text(text)
 
 

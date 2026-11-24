@@ -1,4 +1,5 @@
 import json
+
 import pytest
 
 from better_lavka_mcp.orders.tracking import TrackingShapeError, project_tracking_response

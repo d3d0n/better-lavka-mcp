@@ -150,28 +150,32 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 
 ```mermaid
 flowchart LR
-  C[MCP client] -- stdio --> S[server.py<br>tools · country gate]
-  S --> A[auth/<br>QR login]
-  S --> K[cart · payment]
-  S --> R[region.py<br>RU/KZ anonymous]
-  S --> O[orders/<br>preview · guard · submit · cancel]
+  C[MCP client] -- stdio --> S[app.py<br>tools · text output · country gate]
+  S --> T[tools/<br>storefront · catalog · cart · account · orders]
+  T --> A[auth/<br>QR login]
+  T --> K[client.py · cart.py · payment.py]
+  T --> R[region.py<br>RU/KZ anonymous]
+  T --> O[orders/<br>preview · guard · submit · cancel]
   O --> DB[(SQLite<br>tokens · guard)]
   A --> F[(session file)]
   K & O & R --> L[Lavka web API]
 ```
 
-Session and order state live under `~/.local/share/yandex-lavka-mcp/`.
+Session and order state live under `~/.local/share/yandex-lavka-mcp/` (on Windows, `%LOCALAPPDATA%\better-lavka-mcp`).
 
 <details>
 <summary><strong>Code map</strong></summary>
 
 `src/better_lavka_mcp/`
 
-- `server.py` — the tools
+- `app.py` — the MCP server, text rendering hook, country and address state
+- `tools/` — the tools, grouped by storefront, catalog, cart, account and orders
+- `client.py` — Lavka web API client and the session file
+- `render.py`, `aliases.py` — text output and short three-word ids
 - `auth/` — QR sign-in
-- `cart.py`, `payment.py`, `region.py` — cart, saved cards, RU/KZ storefronts
-- `orders/` — preview, submit, cancel, tracking
-- `constants.py`, `errors.py` — shared bits
+- `cart.py`, `payment.py`, `region.py` — cart writes, saved cards and payment status, RU/KZ storefronts
+- `orders/` — preview, submit, cancel, guards, tracking
+- `paths.py`, `preferences.py`, `uninstall.py` — data folder, remembered choices, `uninstall`
 
 </details>
 

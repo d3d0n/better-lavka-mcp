@@ -2,7 +2,7 @@ import pytest
 
 
 def test_active_order_feed_requires_verified_array():
-    from better_lavka_mcp.orders.observation import summarize_active_orders, ObservationError
+    from better_lavka_mcp.orders.observation import ObservationError, summarize_active_orders
     assert summarize_active_orders({"orders": []}) == {"active_order_count": 0, "statuses": []}
     with pytest.raises(ObservationError):
         summarize_active_orders({"unrelated": []})

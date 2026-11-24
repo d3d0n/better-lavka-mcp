@@ -10,7 +10,9 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
-PATH = Path.home() / '.local/share/yandex-lavka-mcp/aliases.sqlite'
+from better_lavka_mcp import paths
+
+PATH = paths.data_dir() / 'aliases.sqlite'
 
 # Each word is a single token on its own and after a space in common LLM tokenizers.
 WORDS = (

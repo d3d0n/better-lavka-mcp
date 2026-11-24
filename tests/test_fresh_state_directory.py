@@ -17,12 +17,12 @@ def test_custom_session_fresh_home_initializes_all_order_state(tmp_path, first):
         from pathlib import Path
         import httpx
         from better_lavka_mcp.orders import submit as orders
-        from better_lavka_mcp import server
+        from better_lavka_mcp import client
 
         async def bootstrap(self):
             self.props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return self.props
-        server.Lavka.bootstrap = bootstrap
+        client.Lavka.bootstrap = bootstrap
         async def history():
             return {'orders': [{'order_id': 'test', 'status': 'canceled'}]}
         async def run():

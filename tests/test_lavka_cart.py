@@ -1,6 +1,8 @@
 import json
+
 import httpx
 import pytest
+
 
 @pytest.mark.asyncio
 async def test_retrieve_requires_authenticated_session_and_returns_live_cart():
@@ -62,6 +64,7 @@ async def test_add_counts_from_the_snapshot_whose_version_is_sent():
 @pytest.mark.asyncio
 async def test_concurrent_adds_do_not_overwrite_each_other():
     import asyncio
+
     from better_lavka_mcp.cart import CartClient
     cart = {'version': 1, 'milk': 0}
     async def handle(request):
@@ -82,7 +85,7 @@ async def test_concurrent_adds_do_not_overwrite_each_other():
 @pytest.mark.asyncio
 async def test_unverified_readback_fails_closed():
     from better_lavka_mcp.cart import CartClient
-    from better_lavka_mcp.server import UpstreamError
+    from better_lavka_mcp.errors import UpstreamError
     def handle(request):
         if request.url.path.endswith('/update'):
             return httpx.Response(200, json={'ok': True})
@@ -95,7 +98,7 @@ async def test_unverified_readback_fails_closed():
 
 def test_rejects_unauthenticated_and_ruble_context():
     from better_lavka_mcp.cart import CartClient
-    from better_lavka_mcp.server import UpstreamError
+    from better_lavka_mcp.errors import UpstreamError
     with pytest.raises(UpstreamError, match='authenticated'):
         CartClient(None, {'pageData': {'passportInfo': {'status': 'INVALID_PARAMS'}}}, [69, 41], 'сум')
     with pytest.raises(ValueError, match='currency'):

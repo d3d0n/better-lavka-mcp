@@ -1,5 +1,6 @@
 import pytest
-from better_lavka_mcp import server
+
+from better_lavka_mcp.tools import storefront
 
 
 @pytest.mark.asyncio
@@ -11,7 +12,7 @@ async def test_search_routes_requested_country_to_isolated_regional_client(monke
         async def search(self, query, limit, longitude, latitude):
             return {'country': seen[-1][0], 'products': []}
     monkeypatch.setattr('better_lavka_mcp.region.RegionalStorefront', Regional)
-    result = await server.search_products('milk', 5, 76.945, 43.2389, country='KZ')
+    result = await storefront.search_products('milk', 5, 76.945, 43.2389, country='KZ')
     assert result['country'] == 'KZ'
     assert seen == [('KZ', 0)]
 
@@ -25,4 +26,4 @@ async def test_status_routes_country_to_anonymous_client(monkeypatch):
         async def status(self):
             return {'country': 'RU', 'currency': 'RUB'}
     monkeypatch.setattr('better_lavka_mcp.region.RegionalStorefront', Regional)
-    assert (await server.get_storefront_status(country='RU'))['currency'] == 'RUB'
+    assert (await storefront.get_storefront_status(country='RU'))['currency'] == 'RUB'

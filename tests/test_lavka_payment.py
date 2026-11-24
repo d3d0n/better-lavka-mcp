@@ -1,7 +1,9 @@
 import json
+
 import httpx
 import pytest
-from better_lavka_mcp.server import UpstreamError
+
+from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.payment import PaymentClient
 
 PROPS = {'pageData': {'passportInfo': {'status': 'VALID'}}}

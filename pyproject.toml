@@ -40,3 +40,14 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 160
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E9", "F", "I", "B"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"

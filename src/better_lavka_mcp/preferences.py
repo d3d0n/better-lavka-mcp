@@ -4,7 +4,9 @@ import os
 import tempfile
 from pathlib import Path
 
-PATH = Path.home() / '.local/share/yandex-lavka-mcp/preferences.json'
+from better_lavka_mcp import paths
+
+PATH = paths.data_dir() / 'preferences.json'
 
 
 def load():
