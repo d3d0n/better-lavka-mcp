@@ -138,7 +138,12 @@ def _product_card(r):
                                                if n.get(key) is not None))
     if r.get('description'):
         lines.append(r['description'])
-    lines += [f'{k}: {v}' for k, v in (r.get('details') or {}).items()]
+    details = r.get('details') or {}
+    if r.get('composition') and r['composition'] not in details.values():
+        lines.append(f"Ingredients: {r['composition']}")
+    lines += [f'{k}: {v}' for k, v in details.items()]
+    if r.get('max_quantity'):
+        lines.append(f"Up to {r['max_quantity']:g} per order.")
     lines.append(f"Next: add_to_cart with product_id {ref(r['id'])}.")
     return '\n'.join(lines)
 
