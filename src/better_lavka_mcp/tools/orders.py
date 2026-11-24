@@ -53,7 +53,7 @@ async def _accept_price_changes(http, saved_address_index):
 @tool()
 @uz_only
 async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
-    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing."""
+    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing; if Lavka repriced items since they were added, it re-saves them at the new price and lists the changes."""
     from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
     chosen_card = card_last4

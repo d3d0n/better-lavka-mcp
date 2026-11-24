@@ -21,6 +21,8 @@ async def test_every_tool_tells_clients_whether_it_reads_or_spends():
     tools = {tool.name: tool for tool in await app.mcp.list_tools()}
     assert all(tool.annotations is not None for tool in tools.values())
     assert tools['search_products'].annotations.readOnlyHint is True
+    # preview_order may re-save repriced cart lines, so a host must not auto-approve it as a read.
+    assert tools['preview_order'].annotations.readOnlyHint is False and tools['preview_order'].annotations.destructiveHint is False
     for name in ('submit_order', 'cancel_order'):
         assert tools[name].annotations.destructiveHint is True and not tools[name].annotations.readOnlyHint
         assert 'ctx' not in tools[name].inputSchema['properties']  # the dialog context is not a model argument

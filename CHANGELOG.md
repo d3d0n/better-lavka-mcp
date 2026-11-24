@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-11-24
+
+### Fixed
+- `preview_order` is no longer annotated read-only: since 0.8.1 it can re-save repriced cart lines, so clients should not auto-approve it as a read. It still never orders or charges.
+
 ## [0.8.2] — 2026-11-24
 
 ### Added
@@ -172,7 +177,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...v0.8.0

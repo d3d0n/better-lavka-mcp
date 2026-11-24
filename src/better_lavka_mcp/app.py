@@ -55,11 +55,13 @@ def _hints(read_only=False, destructive=False, idempotent=False, open_world=True
 ANNOTATIONS = {
     **dict.fromkeys(('search_products', 'search_addresses', 'get_product', 'list_categories', 'get_category_products',
                      'get_storefront_status', 'get_cart', 'list_saved_addresses', 'count_saved_addresses', 'list_saved_cards',
-                     'list_order_history', 'get_order', 'list_active_orders', 'get_payment_status', 'preview_order'),
+                     'list_order_history', 'get_order', 'list_active_orders', 'get_payment_status'),
                     _hints(read_only=True)),
     **dict.fromkeys(('select_country', 'use_address'), _hints(idempotent=True, open_world=False)),
     **dict.fromkeys(('start_login', 'get_login_status', 'cancel_login'), _hints()),
     'add_to_cart': _hints(), 'repeat_order': _hints(),
+    # Re-saves cart lines Lavka repriced, so it writes the cart; it never orders or charges.
+    'preview_order': _hints(idempotent=True),
     'set_cart_quantity': _hints(destructive=True, idempotent=True),
     'submit_order': _hints(destructive=True),
     'cancel_order': _hints(destructive=True),
