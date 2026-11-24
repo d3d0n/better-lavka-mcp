@@ -114,6 +114,17 @@ def test_tracking_feed_counts_entries_not_orders():
     assert '2 entries' in text and 'order' not in text.split(';')[0]
 
 
+def test_product_card_shows_ingredients_and_limit_when_only_in_composition():
+    card = {'id': 'p1', 'title': 'Кефир', 'brand': None, 'price_uzs': 18990, 'pack': '900 г', 'available': True,
+            'max_quantity': 24.0, 'description': None, 'nutrition_per_100g': None,
+            'composition': 'Молоко нормализованное, закваска.', 'details': {'Страна': 'Узбекистан'}}
+    text = render.render('get_product', card)
+    assert 'Ingredients: Молоко нормализованное, закваска.' in text and 'Up to 24 per order.' in text
+    # Not repeated when the same text already came as a detail block.
+    card['details']['Состав'] = card['composition']
+    assert 'Ingredients:' not in render.render('get_product', card)
+
+
 @pytest.mark.asyncio
 async def test_address_search_uses_suggest_search(lavka, monkeypatch):
     def handle(request):
