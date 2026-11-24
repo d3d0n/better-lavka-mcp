@@ -9,6 +9,8 @@ from pathlib import Path
 
 import httpx
 
+from better_lavka_mcp import paths
+from better_lavka_mcp.auth import qr as qr_auth
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.paths import session_file
@@ -61,6 +63,7 @@ class Lavka:
         self.http = http
         self.region_http = region_http
         self.props = None
+        self._service = None
 
     async def bootstrap(self):
         # The frontend receives a .yandex.uz identity cookie before API calls.
@@ -99,23 +102,35 @@ class Lavka:
             raise UpstreamError("Upstream requires CAPTCHA")
         return data
 
-    async def search(self, query, limit, location):
-        if not query.strip() or not 1 <= limit <= 50:
-            raise ValueError("Query required; limit must be 1–50")
-        if location is None:
-            raise ValueError("Both longitude and latitude are required for search")
+    async def _service_info(self):
+        """The Uzbekistan currency sign, recovered anonymously when the authenticated homepage omits it.
+
+        A signed-in Lavka homepage often carries only passportInfo, while every storefront request
+        needs the confirmed currency sign. An independent anonymous bootstrap supplies it; the
+        result is cached so a catalog page makes the extra request at most once."""
+        if self._service is not None:
+            return self._service
         p = self.props or await self.bootstrap()
-        info = p.get("pageData", {}).get("serviceInfo", {})
-        region_source = "session_homepage"
-        if not info:
+        info = p.get('pageData', {}).get('serviceInfo')
+        source = 'session_homepage'
+        if not isinstance(info, dict) or not info:
             if self.region_http is not None:
                 anon = await Lavka(self.region_http).bootstrap()
             else:
                 async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as anonymous_http:
                     anon = await Lavka(anonymous_http).bootstrap()
-            info = anon.get("pageData", {}).get("serviceInfo", {})
-            region_source = "independent_anonymous_uz_homepage"
-        if info.get("currency") != "UZS":
+            info = anon.get('pageData', {}).get('serviceInfo')
+            source = 'independent_anonymous_uz_homepage'
+        self._service = (info if isinstance(info, dict) else {}, source)
+        return self._service
+
+    async def search(self, query, limit, location):
+        if not query.strip() or not 1 <= limit <= 50:
+            raise ValueError("Query required; limit must be 1–50")
+        if location is None:
+            raise ValueError("Both longitude and latitude are required for search")
+        info, region_source = await self._service_info()
+        if info.get("currency") != "UZS" or not info.get("currencySign"):
             raise UpstreamError("Uzbekistan currency not confirmed by upstream")
         body = {"depotType": "regular", "currencySign": info.get("currencySign"), "text": query, "productsLimit": limit, "subcategoriesLimit": 0, "useRetail": True, "source": "manual_input"}
         if location is not None:
@@ -216,9 +231,10 @@ class Lavka:
                 'details': details}
 
     async def _storefront_body(self, location):
-        p = self.props or await self.bootstrap()
-        info = p.get('pageData', {}).get('serviceInfo', {})
-        return {'depotType': 'regular', 'currencySign': info.get('currencySign'), 'position': {'location': list(location)}}
+        info, _ = await self._service_info()
+        if info.get('currency') != 'UZS' or not info.get('currencySign'):
+            raise UpstreamError('Uzbekistan currency and sign not confirmed by upstream')
+        return {'depotType': 'regular', 'currencySign': info['currencySign'], 'position': {'location': list(location)}}
 
     async def categories(self, location):
         raw = await self.call('/api/v1/providers/v1/layout', {**await self._storefront_body(location), 'layoutSlug': 'grocery'})
@@ -274,7 +290,7 @@ def _jar_values(jar):
 class _SessionClient(httpx.AsyncClient):
     """Saves cookies Lavka rotated during the calls back to the session file on close."""
 
-    _loaded_from: tuple[bytes, dict] | None = None
+    _loaded_from: tuple[dict, tuple | None] | None = None
 
     async def __aexit__(self, exc_type=None, exc_value=None, traceback=None):
         try:
@@ -286,7 +302,7 @@ class _SessionClient(httpx.AsyncClient):
     def _save_rotated_cookies(self):
         if self._loaded_from is None:
             return
-        raw, values = self._loaded_from
+        values, identity = self._loaded_from
         current = _jar_values(self.cookies.jar)
         if current == values:
             return
@@ -294,25 +310,36 @@ class _SessionClient(httpx.AsyncClient):
         if not any(name == 'Session_id' for _, _, name in current):
             return
         path = Path(STATE)
-        # Another process (a new QR login) replaced the file: keep its session.
-        if path.read_bytes() != raw:
-            return
-        from better_lavka_mcp.auth.qr import save_session
-        save_session(self, path)
+        # Compare and replace under a cross-process lock: a QR login that finished meanwhile
+        # owns the file, and a stale save-back must not erase the new account.
+        with paths.session_lock(path):
+            if qr_auth.session_identity(path) != identity:
+                return
+            qr_auth.save_session(self, path)
 
 
 def create_http():
     client = _SessionClient(timeout=25, follow_redirects=False, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    path = Path(STATE).expanduser()
+    # Refuse a shared or symlinked data directory; a custom YANDEX_SESSION_FILE keeps its own folder.
+    paths.prepare_parent(path, create=False)
     # Preserve original domain scope; never copy .yandex.ru credentials to .uz.
-    if Path(STATE).is_file():
-        raw = Path(STATE).read_bytes()
+    try:
+        raw = paths.read_private_bytes(path, 'Saved session file')
+    except FileNotFoundError:
+        return client
+    try:
         data = json.loads(raw)
-        for item in data.get("cookies", []):
-            try:
-                params = dict(item)
-                params["rest"] = params.pop("_rest", {})
-                client.cookies.jar.set_cookie(Cookie(**params))
-            except (TypeError, KeyError, ValueError):
-                raise UpstreamError("Invalid saved cookie jar") from None
-        client._loaded_from = (raw, _jar_values(client.cookies.jar))
+    except ValueError:
+        raise UpstreamError("Saved session file is not valid JSON; sign in again with start_login") from None
+    if not isinstance(data, dict) or not isinstance(data.get("cookies"), list):
+        raise UpstreamError("Invalid saved cookie jar")
+    for item in data["cookies"]:
+        try:
+            params = dict(item)
+            params["rest"] = params.pop("_rest", {})
+            client.cookies.jar.set_cookie(Cookie(**params))
+        except (TypeError, KeyError, ValueError):
+            raise UpstreamError("Invalid saved cookie jar") from None
+    client._loaded_from = (_jar_values(client.cookies.jar), qr_auth.cookie_identity(client.cookies.jar))
     return client

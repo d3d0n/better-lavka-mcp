@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -59,6 +60,63 @@ async def test_add_counts_from_the_snapshot_whose_version_is_sent():
         await client.set_items({'milk': 2}, add=True)
     assert len(updates) == 1 and len(retrieves) == 2
     assert (updates[0]['cartVersion'], updates[0]['items'][0]['quantity']) == (1, '3')
+
+
+@pytest.mark.asyncio
+async def test_add_keeps_a_fractional_quantity_exact():
+    from better_lavka_mcp.cart import CartClient
+    updates, retrieves = [], []
+    def handle(request):
+        if request.url.path.endswith('/update'):
+            updates.append(json.loads(request.content))
+            return httpx.Response(200, json={'ok': True})
+        retrieves.append(1)
+        quantity = '1.5' if len(retrieves) == 1 else '2.5'
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': len(retrieves),
+                                         'items': [{'id': 'cheese', 'quantity': quantity, 'price': '100'}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CartClient(http, {'pageData': {'passportInfo': {'status': 'VALID'}}}, [65.0, 40.0], 'сум')
+        cart = await client.set_items({'cheese': 1}, add=True)
+    assert updates[0]['items'][0]['quantity'] == '2.5'
+    assert cart['items'][0]['quantity'] == '2.5'
+
+
+@pytest.mark.asyncio
+async def test_add_items_skips_a_fractional_weight_item_and_reports_outcomes():
+    from better_lavka_mcp.cart import CartClient
+    updates = []
+    def handle(request):
+        if request.url.path.endswith('/update'):
+            updates.append(json.loads(request.content))
+            return httpx.Response(200, json={'ok': True})
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': 1,
+                                         'items': [{'id': 'cheese', 'quantity': '1.5', 'price': '100'}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CartClient(http, {'pageData': {'passportInfo': {'status': 'VALID'}}}, [65.0, 40.0], 'сум')
+        cart, outcomes = await client.add_items({'cheese': 1})
+    assert updates == []
+    assert outcomes['cheese']['target'] == Decimal('2.5') and outcomes['cheese']['skipped']
+    assert cart['items'][0]['quantity'] == '1.5'
+
+
+@pytest.mark.asyncio
+async def test_add_items_reports_the_capped_target_and_delta():
+    from better_lavka_mcp.cart import CartClient
+    updates, retrieves = [], []
+    def handle(request):
+        if request.url.path.endswith('/update'):
+            updates.append(json.loads(request.content))
+            return httpx.Response(200, json={'ok': True})
+        retrieves.append(1)
+        quantity = '45' if len(retrieves) == 1 else '50'
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': len(retrieves),
+                                         'items': [{'id': 'water', 'quantity': quantity, 'price': '100'}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CartClient(http, {'pageData': {'passportInfo': {'status': 'VALID'}}}, [65.0, 40.0], 'сум')
+        _, outcomes = await client.add_items({'water': 10})
+    assert updates[0]['items'][0]['quantity'] == '50'
+    assert outcomes['water'] == {'before': Decimal('45'), 'requested': Decimal('55'),
+                                 'target': Decimal('50'), 'added': Decimal('5')}
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,34 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-11-24
+
+### Added
+- `submit_order` and `cancel_order` ask the user in the client's own confirmation dialog when the client supports MCP elicitation; the model can't answer it for them. A "no" sends nothing.
+- Every tool carries MCP annotations (read-only, destructive, idempotent), so clients can ask before the tools that spend or cancel.
+- `add_to_cart` and `repeat_order` say how many were added and how many are now in the cart, and list items they skipped.
+
+### Fixed
+- Two server processes holding different previews can no longer both send a checkout: the order lock is taken before the cart is re-read.
+- A tool call made while a QR login waits for the scan no longer makes that login fail with "signed in elsewhere": a refreshed service cookie doesn't count as another account.
+- Saving refreshed cookies and saving a new QR login share one cross-process lock, so an older session can't overwrite a newer login.
+- Signing in to a different Yandex account forgets the previous account's remembered address and card.
+- Product cards, the catalog and categories get the currency sign even when the signed-in homepage omits it.
+- `preview_order` refuses when the remembered address moved in the saved list between two reads, instead of previewing another address.
+- The order preview shows the city, door code, delivery instructions and courier note that the order sends.
+- The payment status `cancel` reads as canceled, not as still processing.
+- With no usable card, `preview_order` says to add one in the Lavka app instead of asking which card.
+- The 50-per-line limit is reported under "Limited" instead of silently cutting the quantity.
+- Fractional (weighed) quantities are no longer rounded to whole units when adding to the cart or repeating an order.
+- `use_address("9")` with three saved addresses says there is no address 9 instead of picking the one on house 9.
+- An unknown storefront state reads as unknown, not as closed.
+- Searches in Russia and Kazakhstan no longer suggest tools that work only in Uzbekistan.
+- Product, address and order text from Lavka is flattened and quoted, so it can't pose as the server's own instructions; the server instructions say such text is never the user's approval.
+
+### Security
+- The session file, preferences and short-id database are refused when they are symlinks or readable by other users; nothing is chmod-ed through a symlink.
+- GitHub Actions are pinned to commit SHAs; the PyPI upload runs in a job without the repository checkout.
+
 ## [0.6.1] — 2026-11-24
 
 ### Fixed
@@ -87,7 +115,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.2...v0.5.3

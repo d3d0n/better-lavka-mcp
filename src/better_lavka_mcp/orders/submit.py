@@ -77,11 +77,13 @@ async def addresses(http):
     return client, data
 
 
-async def snapshot(http, address_index, suffix):
+async def snapshot(http, address_index, suffix, expected_address_id=None):
     client, entries = await addresses(http)
     if type(address_index) is not int or not 0 <= address_index < len(entries) or not isinstance(suffix, str) or not re.fullmatch(r'[0-9]{4}', suffix):
         raise ValueError('Select an exact saved address index and four-digit card suffix')
     entry = entries[address_index]
+    if expected_address_id is not None and entry.get('addressId') != expected_address_id:
+        raise ValueError('The saved address moved or vanished; call use_address again')
     address = entry['address']
     loc = address.get('location')
     if not isinstance(loc, list) or len(loc) != 2:
@@ -114,7 +116,7 @@ async def snapshot(http, address_index, suffix):
         raise ValueError('Saved address is incomplete')
     # Bind all raw item fields, fees and delivery metadata, not only displayed fields.
     binding = {'entry': entry, 'position':position, 'info':info, 'cart':cart, 'card':card,
-               'index':address_index, 'suffix':suffix}
+               'index':address_index, 'suffix':suffix, 'expected_address_id':expected_address_id}
     try:
         return json.loads(json.dumps(binding, sort_keys=True, allow_nan=False)), props
     except (TypeError, ValueError):
@@ -173,6 +175,23 @@ def _finish(nonce, outcome, detail):
             db.execute('DELETE FROM attempts WHERE slot=1')
 
 
+def _release(nonce, detail):
+    """Release our own reservation when no checkout request was sent.
+
+    The reserved slot was never exposed to the network, so it can be freed
+    without reconciliation. The preview stays consumed: a submit attempt that
+    fails preflight requires a fresh preview.
+    """
+    with _guard_db() as db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT nonce FROM mcp_attempt WHERE slot=1').fetchone() != (nonce,):
+            return
+        db.execute('INSERT INTO mcp_attempt_audit (recorded_at,event,detail) VALUES (?,?,?)', (time.time(), 'preflight_released', detail))
+        db.execute('DELETE FROM mcp_attempt WHERE slot=1')
+        db.execute('DELETE FROM attempt_state WHERE slot=1')
+        db.execute('DELETE FROM attempts WHERE slot=1')
+
+
 def reconcile_checkout(*, history_checked, payment_checked, acknowledge_uncertainty, no_request_in_progress, explicit_confirmation):
     """Record user attestation, not verified evidence, and release an unknown slot."""
     if any(x is not True for x in (history_checked, payment_checked, acknowledge_uncertainty, no_request_in_progress, explicit_confirmation)):
@@ -188,8 +207,8 @@ def reconcile_checkout(*, history_checked, payment_checked, acknowledge_uncertai
     return {'released': True, 'warning': 'User attestation is not proof; delayed processing and duplicate orders remain possible. Obtain a fresh preview and explicit confirmation.'}
 
 
-async def preview(http, address_index, card_suffix):
-    binding, _ = await snapshot(http, address_index, card_suffix)
+async def preview(http, address_index, card_suffix, expected_address_id=None):
+    binding, _ = await snapshot(http, address_index, card_suffix, expected_address_id)
     _check_guard()
     binding = {'data': binding, 'session': _session(http)}
     token = secrets.token_urlsafe(32)
@@ -202,7 +221,17 @@ async def preview(http, address_index, card_suffix):
             'card':'**** '+card_suffix, 'delivery':'non-rover', 'warning':WARNING}
 
 
-async def submit(http, token, confirmed_total_uzs, explicit_confirmation):
+async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approve=None):
+    """Send the one checkout request for a fresh, user-confirmed preview.
+
+    The account-wide guard is reserved before the cart is refreshed and compared,
+    so two processes holding different valid previews can never both reach the
+    network. A submit attempt consumes its preview even when preflight then fails;
+    if no request was sent, the reservation is released for a later attempt.
+
+    `approve(preview_data)` asks the person directly (MCP elicitation) when the client can;
+    a refusal sends nothing and leaves the preview unused.
+    """
     if explicit_confirmation is not True or not isinstance(confirmed_total_uzs, str):
         raise ValueError('Explicit confirmation and exact total string required')
     digest = _token(token)
@@ -216,22 +245,27 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation):
     old = stored['data']
     if confirmed_total_uzs != old['cart']['totalPriceValue']:
         raise ValueError('Confirmed total differs from preview')
-    fresh, props = await snapshot(http, old['index'], old['suffix'])
-    if not 0 <= time.time()-row[1] < 300:
-        raise ValueError('Preview expired during preflight')
-    if stored['session'] != _session(http):
-        raise ValueError('Authenticated session changed during preflight')
-    if fresh != old:
-        raise ValueError('Checkout data changed; obtain and confirm a new preview')
-    cart, pos, card = fresh['cart'], fresh['position'], fresh['card']
-    payload = build_provider_payload(cart_id=cart['cartId'], cart_version=cart['cartVersion'], flow_version=cart['orderFlowVersion'], position=pos, depot_type='regular', payment_type=card['type'], payment_id=card['id'], options={'useRover':False})
-    # Consume first, then commit the existing account-wide quarantine before I/O.
-    with _db() as db:
-        db.execute('BEGIN IMMEDIATE')
-        cur = db.execute('UPDATE order_previews SET used=1 WHERE token=? AND used=0', (digest,))
-        if cur.rowcount != 1:
-            raise ValueError('Preview already consumed')
+    if approve is not None and not await approve(old):
+        return {'outcome': 'declined'}
     nonce = _reserve()
+    try:
+        with _db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            cur = db.execute('UPDATE order_previews SET used=1 WHERE token=? AND used=0', (digest,))
+            if cur.rowcount != 1:
+                raise ValueError('Preview already consumed')
+        fresh, props = await snapshot(http, old['index'], old['suffix'], old.get('expected_address_id'))
+        if not 0 <= time.time()-row[1] < 300:
+            raise ValueError('Preview expired during preflight')
+        if stored['session'] != _session(http):
+            raise ValueError('Authenticated session changed during preflight')
+        if fresh != old:
+            raise ValueError('Checkout data changed; obtain and confirm a new preview')
+        cart, pos, card = fresh['cart'], fresh['position'], fresh['card']
+        payload = build_provider_payload(cart_id=cart['cartId'], cart_version=cart['cartVersion'], flow_version=cart['orderFlowVersion'], position=pos, depot_type='regular', payment_type=card['type'], payment_id=card['id'], options={'useRover':False})
+    except BaseException:
+        _release(nonce, 'Preflight failed before any checkout write')
+        raise
     headers = {'Origin':BASE, 'Referer':BASE+'/', 'X-Requested-With':'XMLHttpRequest',
                'X-Csrf-Token':props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff':props.get('csrfToken') or ''}
     try:

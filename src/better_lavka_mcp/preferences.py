@@ -10,9 +10,19 @@ PATH = paths.data_dir() / 'preferences.json'
 
 
 def load():
+    """The remembered choices; an absent or malformed file means none were saved.
+
+    A symlinked or group/world-readable file is refused rather than read: it holds the address
+    where the user gets deliveries."""
+    target = Path(PATH)
+    paths.prepare_parent(target, create=False)
     try:
-        data = json.loads(Path(PATH).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
+        raw = paths.read_private_bytes(target, 'Preferences file')
+    except FileNotFoundError:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -20,7 +30,7 @@ def load():
 def update(**values):
     """Merge values into the preferences file atomically; None removes a key."""
     target = Path(PATH)
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.prepare_parent(target)
     data = load()
     for key, value in values.items():
         if value is None:

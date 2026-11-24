@@ -43,40 +43,63 @@ def _cart_view(cart):
 
 
 def _quantity(value):
+    """An exact cart quantity, or None when it cannot be trusted."""
     try:
-        return int(Decimal(str(value)))
+        number = Decimal(str(value))
     except (InvalidOperation, ValueError):
-        return 0
+        return None
+    return number if number.is_finite() and number >= 0 else None
+
+
+def _display(number):
+    """A JSON-safe quantity: int when whole, float for fractional weights."""
+    return int(number) if number == number.to_integral_value() else float(number)
 
 
 async def _add_products(cart_client, wanted, titles):
     """Add quantities on top of the cart, then drop what the store cannot sell and cap at its limits.
 
-    Both writes run under one cart lock so another call can't change the cart in between."""
+    Both writes run under one cart lock so another call can't change the cart in between.
+    Weight items already in the cart with a fractional quantity are left untouched and reported as skipped."""
     async with cart_client.transaction():
         return await _add_and_correct(cart_client, wanted, titles)
 
 
 async def _add_and_correct(cart_client, wanted, titles):
-    fresh = await cart_client.set_items({pid: min(qty, 50) for pid, qty in wanted.items()}, add=True)
+    fresh, outcomes = await cart_client.add_items(dict(wanted))
     by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
-    targets = {pid: _quantity(by_id.get(pid, {}).get('quantity')) for pid in wanted}
-    fixes, unavailable, limited = {}, [], []
-    for pid, target in targets.items():
+    fixes, unavailable, limited, skipped = {}, [], [], []
+    for pid, outcome in outcomes.items():
         item = by_id.get(pid, {})
         title = clean_text(item.get('title')) or titles.get(pid) or pid
+        if outcome.get('skipped'):
+            skipped.append({'title': title, 'reason': outcome['skipped']})
+            continue
+        if outcome['requested'] > 50:
+            limited.append({'title': title, 'requested': _display(outcome['requested']), 'max': 50})
         limit = _number(item.get('quantityLimit'))
         if item.get('isUnavailableOnDepot') is True or limit == 0:
             fixes[pid] = 0
             unavailable.append(title)
-        elif limit is not None and target > limit:
+        elif limit is not None and outcome['target'] > Decimal(str(limit)):
             fixes[pid] = int(limit)
-            limited.append({'title': title, 'requested': target, 'max': int(limit)})
+            limited.append({'title': title, 'requested': _display(outcome['target']), 'max': _display(Decimal(str(limit)))})
     if fixes:
         fresh = await cart_client.set_items(fixes)
-    added = [{'product_id': pid, 'title': clean_text(by_id.get(pid, {}).get('title')) or titles.get(pid),
-              'quantity': fixes.get(pid, target)} for pid, target in targets.items() if fixes.get(pid, target)]
-    return {'added': added, 'unavailable': unavailable, 'limited': limited, 'cart': _cart_view(fresh)}
+    final_by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
+    added = []
+    for pid, outcome in outcomes.items():
+        if outcome.get('skipped'):
+            continue
+        item = final_by_id.get(pid, {})
+        after = _quantity(item.get('quantity'))
+        if after is None:
+            continue
+        change = after - outcome['before']
+        if change > 0 and after > 0:
+            added.append({'product_id': pid, 'title': clean_text(item.get('title')) or titles.get(pid) or pid,
+                          'added': _display(change), 'in_cart': _display(after)})
+    return {'added': added, 'unavailable': unavailable, 'limited': limited, 'skipped': skipped, 'cart': _cart_view(fresh)}
 
 
 @tool()
@@ -142,7 +165,7 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
                 product_id, titles[match['id']] = match['id'], match['title']
             wanted[product_id] = wanted.get(product_id, 0) + quantity
         if not wanted:
-            return {'added': [], 'needs_choice': needs_choice, 'not_found': not_found, 'unavailable': [], 'limited': [], 'cart': _cart_view(await cart_client.retrieve())}
+            return {'added': [], 'needs_choice': needs_choice, 'not_found': not_found, 'unavailable': [], 'limited': [], 'skipped': [], 'cart': _cart_view(await cart_client.retrieve())}
         result = await _add_products(cart_client, wanted, titles)
     return {**result, 'needs_choice': needs_choice, 'not_found': not_found}
 
@@ -169,11 +192,21 @@ async def repeat_order(order_id: str = 'last', longitude: float | None = None, l
                 raise ValueError('There are no past orders yet')
             order_id = history['orders'][0]['order_id']
         order = await lavka.order(resolve(order_id))
-        wanted, titles = {}, {}
+        wanted, titles, skipped = {}, {}, []
         for line in order['items']:
-            wanted[line['product_id']] = wanted.get(line['product_id'], 0) + max(_quantity(line.get('quantity')), 1)
+            quantity = _quantity(line.get('quantity'))
+            if quantity is not None and quantity != quantity.to_integral_value():
+                skipped.append({'title': line['name'],
+                                'reason': 'Historical quantity is fractional (weight item); it cannot be repeated as a unit line'})
+                continue
+            wanted[line['product_id']] = wanted.get(line['product_id'], 0) + max(int(quantity or 0), 1)
             titles[line['product_id']] = line['name']
         if not wanted:
-            raise ValueError('That order has no products to repeat')
-        result = await _add_products(cart_client, wanted, titles)
+            if not skipped:
+                raise ValueError('That order has no products to repeat')
+            result = {'added': [], 'unavailable': [], 'limited': [], 'skipped': skipped,
+                      'cart': _cart_view(await cart_client.retrieve())}
+        else:
+            result = await _add_products(cart_client, wanted, titles)
+            result['skipped'] = skipped + result['skipped']
     return {'order': {k: order[k] for k in ('order_id', 'created_at', 'total_uzs')}, **result}

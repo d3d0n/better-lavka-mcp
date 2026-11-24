@@ -1,17 +1,20 @@
 """Local-only QR login tools; returns an image and short-lived link."""
 import asyncio
-import hashlib
 import os
 import time
 from pathlib import Path
 
+from better_lavka_mcp import paths
+from better_lavka_mcp.auth import qr as qr_auth
+
 
 class QRLogin:
-    def __init__(self, session_path, manager, verify=None, ttl=180):
+    def __init__(self, session_path, manager, verify=None, ttl=180, account_changed=None):
         self.session = Path(session_path)
         self.manager = manager
         self.verify = verify
         self.ttl = ttl
+        self.account_changed = account_changed
         self.lock = asyncio.Lock()
         self.started = None
         self.original = None
@@ -21,11 +24,49 @@ class QRLogin:
             raise RuntimeError('No session verifier configured')
         return await self.verify(path)
 
-    def _fingerprint(self):
+    def _identity(self):
+        """Account identity of the saved session; an unsafe file is refused, not read."""
+        return qr_auth.session_identity(self.session)
+
+    def _finish(self):
+        if self.manager.auth is None:
+            self.started = None
+            self.manager.session_path.unlink(missing_ok=True)
+
+    def _forget_previous_account(self):
+        """Drop choices that belonged to the previous account; False when that failed."""
+        if self.account_changed is None:
+            return True
         try:
-            return hashlib.sha256(self.session.read_bytes()).digest()
-        except FileNotFoundError:
-            return None
+            self.account_changed()
+        except Exception:
+            return False
+        return True
+
+    def _unchanged_since_start(self):
+        """True while the saved session is still the one this login set out to replace."""
+        current = self._identity()
+        if self.original is None:
+            return current is None
+        return qr_auth.same_account(self.original, current)
+
+    def _promote(self):
+        """Replace the saved session with the verified one, comparing under the cross-process lock.
+
+        Compares the account identity, not the file bytes: a normal tool call saves a rotated
+        service cookie without changing the account, and that must not fail a finished login."""
+        staged = self.manager.session_path
+        staged_identity = qr_auth.session_identity(staged)
+        with paths.session_lock(self.session):
+            if not self._unchanged_since_start():
+                return {'status': 'session_changed', 'note': 'Existing session was not replaced.'}
+            paths.prepare_parent(self.session)
+            os.replace(staged, self.session)
+        if not qr_auth.same_account(self.original, staged_identity):
+            if not self._forget_previous_account():
+                return {'status': 'authenticated',
+                        'note': 'Signed in, but the remembered address and card could not be cleared; ask the user to choose them again.'}
+        return {'status': 'authenticated'}
 
     async def start(self, replace_existing=False):
         async with self.lock:
@@ -34,7 +75,7 @@ class QRLogin:
                     return {'status': 'already_pending'}
                 await self.manager.close()
                 self.started = None
-            original = self._fingerprint()
+            original = self._identity()
             if original is not None and not replace_existing:
                 return {'status': 'replacement_requires_approval'}
             try:
@@ -48,7 +89,7 @@ class QRLogin:
     async def status(self):
         async with self.lock:
             if self.started is None:
-                if not self.session.exists():
+                if self._identity() is None:
                     return {'status': 'login_required'}
                 try:
                     valid = await self._verify(self.session)
@@ -61,25 +102,24 @@ class QRLogin:
                 return {'status': 'expired'}
             try:
                 result = await self.manager.poll()
-                if result['status'] == 'pending':
-                    return {'status': 'pending'}
-                staged = self.manager.session_path
-                if not await self._verify(staged):
-                    return {'status': 'verification_failed'}
-                if self._fingerprint() != self.original:
-                    return {'status': 'session_changed', 'note': 'Existing session was not replaced.'}
-                if self.original is None:
-                    os.link(staged, self.session)
-                    staged.unlink()
-                else:
-                    os.replace(staged, self.session)
-                return {'status': 'authenticated'}
             except Exception:
-                return {'status': 'error', 'note': 'Login or verification failed; existing session was not replaced.'}
+                return {'status': 'error', 'note': 'Login failed; existing session was not replaced.'}
+            if result['status'] == 'pending':
+                return {'status': 'pending'}
+            try:
+                verified = await self._verify(self.manager.session_path)
+            except Exception:
+                verified = None
+            if verified is None:
+                self._finish()
+                return {'status': 'error', 'note': 'Login verification failed; existing session was not replaced.'}
+            if not verified:
+                self._finish()
+                return {'status': 'verification_failed'}
+            try:
+                return self._promote()
             finally:
-                if self.manager.auth is None:
-                    self.started = None
-                    self.manager.session_path.unlink(missing_ok=True)
+                self._finish()
 
     async def cancel(self):
         async with self.lock:
@@ -102,7 +142,7 @@ def register_qr_tools(mcp, session_path, guard=None):
         guard = lambda fn: fn
 
     session = Path(session_path).expanduser()
-    session.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    paths.prepare_parent(session)
     # Per-process paths avoid clobbering another server's pending login.
     import secrets
     suffix = secrets.token_hex(12)
@@ -111,7 +151,7 @@ def register_qr_tools(mcp, session_path, guard=None):
     async def verify(path):
         from better_lavka_mcp.client import Lavka
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
-            data = json.loads(path.read_text())
+            data = json.loads(paths.read_private_bytes(path, 'Saved session file'))
             for item in data['cookies']:
                 params = dict(item)
                 params['rest'] = params.pop('_rest', {})
@@ -119,14 +159,20 @@ def register_qr_tools(mcp, session_path, guard=None):
             props = await Lavka(http).bootstrap()
             return props.get('pageData', {}).get('passportInfo', {}).get('status') == 'VALID'
 
-    login = QRLogin(session, manager, verify)
+    def forget_previous_account():
+        """The remembered address and card were chosen for the previous Yandex account."""
+        from better_lavka_mcp import app as lavka_app
+        lavka_app._forget_account_choices()
 
+    login = QRLogin(session, manager, verify, account_changed=forget_previous_account)
+
+    from better_lavka_mcp.app import ANNOTATIONS
     from better_lavka_mcp.render import json_output, render
 
     def as_text(tool, result):
         return json.dumps(result) if json_output() else render(tool, result)
 
-    @mcp.tool(structured_output=False)
+    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['start_login'])
     @guard
     async def start_login(replace_existing_session: bool = False):
         """Sign in to Lavka: returns a QR code to scan in the Yandex app and a short-lived link to open on the phone instead. Both are login keys: show them only to the user. replace_existing_session=true switches accounts and needs the user's approval."""
@@ -145,13 +191,13 @@ def register_qr_tools(mcp, session_path, guard=None):
             content.append(ImageContent(type='image', data=base64.b64encode(image).decode('ascii'), mimeType='image/png'))
         return content
 
-    @mcp.tool(structured_output=False)
+    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['get_login_status'])
     @guard
     async def get_login_status() -> str:
         """Check the QR login: pending, signed in, expired or failed. Saves the session once Lavka confirms it. Never returns credentials."""
         return as_text('get_login_status', await login.status())
 
-    @mcp.tool(structured_output=False)
+    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['cancel_login'])
     async def cancel_login() -> str:
         """Stop a pending QR login and delete its QR image. Does not sign out an existing session."""
         return as_text('cancel_login', await login.cancel())

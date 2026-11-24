@@ -67,7 +67,8 @@ class CartClient:
         """Set absolute quantities for several products in one update; 0 removes.
 
         With add=True the numbers are added to what the cart holds, computed from
-        the same snapshot whose cartVersion is sent (capped at 50).
+        the same snapshot whose cartVersion is sent (capped at 50). Fractional
+        quantities already in the cart stay Decimal (1.5 + 1 -> 2.5), never int().
         Lavka requires a non-empty price per line but reprices every line itself,
         so the current cart price is reused and new products get a placeholder.
         """
@@ -77,10 +78,24 @@ class CartClient:
         for product_id, quantity in quantities.items():
             if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not lowest <= quantity <= 50:
                 raise ValueError(f'Each product needs an id and a quantity between {lowest} and 50')
-        if self._held:
-            return await self._write(quantities, add)
-        async with _write_lock():
-            return await self._write(quantities, add)
+        fresh, _ = await self._locked_write(quantities, add)
+        return fresh
+
+    async def add_items(self, increments):
+        """Add integer quantities and report what each line actually did.
+
+        Returns (cart, outcomes): outcomes[product_id] holds Decimal before,
+        requested (before + increment), target (requested capped at 50), added
+        (read-back quantity minus before) and skipped when the existing quantity
+        is fractional — a weight item, not safely writable as a 'unit' line.
+        Increments may exceed 50 so the caller can report the per-line cap.
+        """
+        if not isinstance(increments, dict) or not increments:
+            raise ValueError('At least one product is required')
+        for product_id, quantity in increments.items():
+            if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+                raise ValueError('Each product needs an id and a positive integer quantity')
+        return await self._locked_write(increments, True, skip_fractional=True)
 
     @contextlib.asynccontextmanager
     async def transaction(self):
@@ -92,7 +107,13 @@ class CartClient:
             finally:
                 self._held = False
 
-    async def _write(self, quantities, add):
+    async def _locked_write(self, quantities, add, skip_fractional=False):
+        if self._held:
+            return await self._write(quantities, add, skip_fractional=skip_fractional)
+        async with _write_lock():
+            return await self._write(quantities, add, skip_fractional=skip_fractional)
+
+    async def _write(self, quantities, add, skip_fractional=False):
         def counts(items):
             result = {}
             for item in items:
@@ -109,12 +130,22 @@ class CartClient:
 
         cart = await self.retrieve()
         before = counts(cart['items'])
-        if add:
-            quantities = {pid: min(int(before.get(pid, 0)) + qty, 50) for pid, qty in quantities.items()}
+        outcomes, written = {}, {}
+        for product_id, quantity in quantities.items():
+            start = before.get(product_id, Decimal(0))
+            requested = start + quantity if add else Decimal(quantity)
+            target = min(requested, Decimal(50)) if add else requested
+            outcomes[product_id] = {'before': start, 'requested': requested, 'target': target, 'added': Decimal(0)}
+            if skip_fractional and start != start.to_integral_value():
+                outcomes[product_id]['skipped'] = 'Cart already holds a fractional (weight) quantity; it was not changed'
+                continue
+            written[product_id] = target
+        if not written:
+            return cart, outcomes
         prices = {item['id']: str(item.get('price') or '') for item in cart['items']}
         lines = [{'id': product_id, 'quantity': str(quantity), 'pricePerCount': '1', 'quantityType': 'unit',
                   'price': prices.get(product_id) or PLACEHOLDER_PRICE, 'title': '', 'currency': 'UZS'}
-                 for product_id, quantity in quantities.items()]
+                 for product_id, quantity in written.items()]
         body = {'items': lines,
                 'deliveryTimeInfo': cart.get('deliveryTimeInfo'), 'deliveryType': cart.get('deliveryType'),
                 'position': {'location': self.location}, 'additionalData': {}, 'cartId': cart['cartId'],
@@ -124,12 +155,15 @@ class CartClient:
         fresh = await self.retrieve()
         if fresh['cartId'] != cart['cartId']:
             raise UpstreamError('Cart identity changed during update; outcome is uncertain')
-        after = counts(fresh['items'])
-        for product_id, quantity in quantities.items():
-            if after.get(product_id, 0) != quantity:
+        final = counts(fresh['items'])
+        for product_id, quantity in written.items():
+            if final.get(product_id, 0) != quantity:
                 raise UpstreamError('Cart readback did not verify requested item quantity')
-            before.pop(product_id, None)
-            after.pop(product_id, None)
-        if before != after:
+        for product_id, outcome in outcomes.items():
+            if product_id in written:
+                outcome['added'] = final.get(product_id, Decimal(0)) - outcome['before']
+        remaining_before = {pid: qty for pid, qty in before.items() if pid not in written}
+        remaining_final = {pid: qty for pid, qty in final.items() if pid not in written}
+        if remaining_before != remaining_final:
             raise UpstreamError('Unrelated cart items changed during update; outcome is uncertain')
-        return fresh
+        return fresh, outcomes

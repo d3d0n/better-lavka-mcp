@@ -26,13 +26,18 @@ async def use_address(address: str) -> dict:
                'work': ('работа', 'ish'), 'работа': ('work', 'ish'), 'ish': ('work', 'работа')}
     wanted = (query,) + aliases.get(query, ())
     labels = [(entry['address'].get('label') or '').strip().casefold() for entry in entries]
-    if query.isdigit() and int(query) < len(entries):
-        matches = [int(query)]
+    if query.isdigit():
+        index = int(query)
+        if index >= len(entries):
+            return {'selected': False, 'reason': 'invalid_index',
+                    'candidates': [_address_summary(entry, i) for i, entry in enumerate(entries)],
+                    'note': 'Ask which one and call use_address again with its name or index.'}
+        matches = [index]
     else:
         matches = [i for i, label in enumerate(labels) if label in wanted]
-    if not matches:
-        matches = [i for i, entry in enumerate(entries)
-                   if any(query in str(entry['address'].get(k) or '').casefold() for k in ('label', 'shortAddress', 'fullAddress'))]
+        if not matches:
+            matches = [i for i, entry in enumerate(entries)
+                       if any(query in str(entry['address'].get(k) or '').casefold() for k in ('label', 'shortAddress', 'fullAddress'))]
     if len(matches) != 1:
         return {'selected': False,
                 'reason': 'ambiguous' if matches else 'not_found',

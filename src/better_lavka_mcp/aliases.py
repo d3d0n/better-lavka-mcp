@@ -6,7 +6,9 @@ Issued short ids live in an owner-only SQLite file and are never reused for anyt
 both columns are UNIQUE, allocation runs in one transaction, so several server processes agree,
 and a hash collision takes the next free variant.
 """
+import errno
 import hashlib
+import os
 import sqlite3
 from pathlib import Path
 
@@ -31,10 +33,26 @@ _WORD_SET = frozenset(WORDS)
 
 
 def _connect():
+    """Open the alias database owner-only, never through a symlink.
+
+    SQLite opens its path itself, so the file is created here with O_NOFOLLOW and checked
+    through the descriptor first; chmod after the fact would follow a planted symlink."""
     target = Path(PATH)
-    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths.prepare_parent(target)
+    if target.is_symlink():
+        raise ValueError(f'Alias database must not be a symlink: {target}')
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    except OSError as error:
+        if error.errno in (errno.ELOOP, errno.EMLINK):
+            raise ValueError(f'Alias database must not be a symlink: {target}') from None
+        raise
+    try:
+        if not paths.private_file(os.fstat(fd)):
+            raise ValueError(f'Alias database must be readable only by you: {target}; delete it to start a new one')
+    finally:
+        os.close(fd)
     db = sqlite3.connect(target, timeout=10, isolation_level=None)
-    target.chmod(0o600)
     db.execute('CREATE TABLE IF NOT EXISTS aliases (alias TEXT PRIMARY KEY, real_id TEXT NOT NULL UNIQUE)')
     return db
 

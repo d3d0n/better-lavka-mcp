@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -6,12 +7,23 @@ import pytest
 from better_lavka_mcp import app, client
 from better_lavka_mcp.orders import submit as orders
 from better_lavka_mcp.orders.cancel import CancellationBlocked
+from better_lavka_mcp.orders.guard import AttemptBlocked
+from better_lavka_mcp.tools import orders as order_tools
 
 
 @pytest.mark.asyncio
 async def test_order_tools_are_exposed():
     names = {tool.name for tool in await app.mcp.list_tools()}
     assert {'preview_order', 'submit_order', 'cancel_order', 'list_saved_addresses'} <= names
+
+@pytest.mark.asyncio
+async def test_every_tool_tells_clients_whether_it_reads_or_spends():
+    tools = {tool.name: tool for tool in await app.mcp.list_tools()}
+    assert all(tool.annotations is not None for tool in tools.values())
+    assert tools['search_products'].annotations.readOnlyHint is True
+    for name in ('submit_order', 'cancel_order'):
+        assert tools[name].annotations.destructiveHint is True and not tools[name].annotations.readOnlyHint
+        assert 'ctx' not in tools[name].inputSchema['properties']  # the dialog context is not a model argument
 
 @pytest.mark.asyncio
 async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
@@ -91,6 +103,84 @@ async def test_expiry_during_fresh_preflight_prevents_write(tmp_path, monkeypatc
         p=await orders.preview(http,0,'1234')
         now[0]+=150
         with pytest.raises(ValueError,match='expired'): await orders.submit(http,p['preview_token'],'10',True)
+        # Preflight failed before any write, so the guard must be free for a new preview.
+        assert (await orders.preview(http,0,'1234'))['preview_token']
+
+@pytest.mark.asyncio
+async def test_changed_data_during_preflight_releases_guard(tmp_path, monkeypatch):
+    monkeypatch.setattr(orders, 'GUARD', tmp_path/'guard')
+    monkeypatch.setattr(orders, 'STATE', tmp_path/'previews')
+    old = {'cart': {'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]},
+           'position': {'location':[69.2,41.3]}, 'card': {'type':'card','id':'id'}, 'index':0, 'suffix':'1234'}
+    new = {**old, 'cart': {**old['cart'], 'cartVersion': 2}}
+    bindings = [old, new]
+    async def snap(*args):
+        return bindings.pop(0), {}
+    monkeypatch.setattr(orders, 'snapshot', snap)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: pytest.fail('write attempted'))) as http:
+        http.cookies.set('Session_id','test',domain='.yandex.uz',path='/')
+        p = await orders.preview(http,0,'1234')
+        with pytest.raises(ValueError, match='changed'): await orders.submit(http,p['preview_token'],'10',True)
+        bindings.append(old)
+        assert (await orders.preview(http,0,'1234'))['preview_token']
+
+
+@pytest.mark.asyncio
+async def test_two_valid_previews_cannot_both_submit(tmp_path, monkeypatch):
+    monkeypatch.setattr(orders, 'GUARD', tmp_path/'guard')
+    monkeypatch.setattr(orders, 'STATE', tmp_path/'previews')
+    binding = {'cart': {'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]},
+               'position': {'location':[69.2,41.3]}, 'card': {'type':'card','id':'id'}, 'index':0, 'suffix':'1234'}
+    calls, paused, release = [], asyncio.Event(), asyncio.Event()
+    async def snap(*args):
+        calls.append(1)
+        if len(calls) <= 2:
+            return binding, {}
+        paused.set()
+        await release.wait()
+        return binding, {}
+    posts = []
+    def handle(request):
+        if request.url.path.endswith('/submit'):
+            posts.append(request.url.path)
+            return httpx.Response(200, json={'orderId':'one'})
+        if request.url.path.endswith('payments/v1/status'):
+            return httpx.Response(200, json={'status':'success'})
+        raise AssertionError(request.url.path)
+    monkeypatch.setattr(orders, 'snapshot', snap)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        http.cookies.set('Session_id','test',domain='.yandex.uz',path='/')
+        first = await orders.preview(http, 0, '1234')
+        second = await orders.preview(http, 0, '1234')
+        sending = asyncio.create_task(orders.submit(http, first['preview_token'], '10', True))
+        await paused.wait()
+        refused = False
+        try:
+            await orders.submit(http, second['preview_token'], '10', True)
+        except AttemptBlocked:
+            refused = True
+        finally:
+            release.set()
+        result = await sending
+    assert refused and result['outcome'] == 'submitted'
+    assert len(posts) == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_refuses_address_that_moved_between_fetches(tmp_path, monkeypatch):
+    monkeypatch.setattr(orders, 'STATE', tmp_path/'previews')
+    monkeypatch.setattr(orders, 'GUARD', tmp_path/'guard')
+    home = {'addressId':'a-home','address':{'label':'Home','location':[69.2,41.3]}}
+    work = {'addressId':'a-work','address':{'label':'Work','location':[69.3,41.2]}}
+    lists = [[home, work], [work, home]]
+    async def addresses(http):
+        return None, lists.pop(0)
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(app, '_delivery', {'address_id':'a-home','location':[69.2,41.3],'index':0,'label':'Home'})
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(lambda request: pytest.fail('network not expected'))))
+    with pytest.raises(ValueError, match='moved'):
+        await order_tools.preview_order(card_last4='1234')
+
 
 @pytest.mark.asyncio
 async def test_cancel_timeout_never_retries(tmp_path, monkeypatch):
@@ -139,6 +229,65 @@ async def test_success_allows_fresh_preview(tmp_path, monkeypatch):
         result = await orders.submit(http,p["preview_token"],"10",True)
         assert result["outcome"] == "submitted" and result["payment_status"] == "success"
         assert (await orders.preview(http, 0, "1234"))["preview_token"]
+
+
+async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
+    """submit_order over a real MCP session whose client answers the confirmation dialog with `answer`."""
+    from mcp.shared.memory import create_connected_server_and_client_session
+    monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
+    monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
+    binding = {"cart": {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": "87630",
+                        "items": [{"id": "x", "title": "Творог", "quantity": "2"}]},
+               "position": {"location": [69.2, 41.3], "city": "Ташкент", "street": "Example street", "house": "1", "leftAtDoor": True},
+               "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
+    async def snap(*args): return binding, {}
+    monkeypatch.setattr(orders, "snapshot", snap)
+    posts, questions = [], []
+    def handle(request):
+        if request.url.path.endswith("payments/v1/status"):
+            return httpx.Response(200, json={"status": "success"})
+        posts.append(request.url.path)
+        return httpx.Response(200, json={"orderId": "one"})
+    def http():
+        session = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        session.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
+        return session
+    monkeypatch.setattr(client, "create_http", http)
+    async with http() as session:
+        token = (await orders.preview(session, 0, "1234"))["preview_token"]
+    async def dialog(context, params):
+        questions.append(params.message)
+        return answer
+    async with create_connected_server_and_client_session(app.mcp, elicitation_callback=dialog if ask else None) as mcp_client:
+        result = await mcp_client.call_tool("submit_order", {"order_preview_token": token, "confirmed_total_uzs": "87630",
+                                                             "explicit_confirmation": True})
+    return result.content[0].text, posts, questions
+
+
+@pytest.mark.asyncio
+async def test_user_saying_no_in_the_client_dialog_sends_nothing(tmp_path, monkeypatch):
+    from mcp.types import ElicitResult
+    text, posts, questions = await _submit_through_mcp(tmp_path, monkeypatch, ElicitResult(action="decline"))
+    assert posts == [] and 'said no' in text
+    # The person sees what they approve: total, card, full address and delivery instructions, items.
+    assert questions and '87 630 сум' in questions[0] and '**** 1234' in questions[0]
+    assert 'Ташкент, Example street, 1' in questions[0] and 'leave at the door' in questions[0] and 'Творог ×2' in questions[0]
+
+
+@pytest.mark.asyncio
+async def test_user_saying_yes_in_the_client_dialog_places_the_order(tmp_path, monkeypatch):
+    from mcp.types import ElicitResult
+    text, posts, _ = await _submit_through_mcp(tmp_path, monkeypatch, ElicitResult(action="accept", content={"approve": True}))
+    assert posts == ["/api/v1/providers/orders/v2/submit"] and 'Order placed' in text
+    # Accepting the dialog without ticking the box is not a yes.
+    text, posts, _ = await _submit_through_mcp(tmp_path, monkeypatch, ElicitResult(action="accept", content={"approve": False}))
+    assert posts == [] and 'said no' in text
+
+
+@pytest.mark.asyncio
+async def test_clients_without_dialogs_still_order_on_explicit_confirmation(tmp_path, monkeypatch):
+    text, posts, questions = await _submit_through_mcp(tmp_path, monkeypatch, None, ask=False)
+    assert questions == [] and posts == ["/api/v1/providers/orders/v2/submit"] and 'Order placed' in text
 
 
 @pytest.mark.asyncio

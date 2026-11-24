@@ -20,6 +20,8 @@ CATALOG = {
     'yogurt-straw': ('Йогурт клубничный', 9990, False, '20'),
     'yogurt-peach': ('Йогурт персиковый', 8990, False, '20'),
     'smetana': ('Сметана', 12990, False, '20'),
+    'water': ('Вода', 5000, False, '50'),
+    'cheese': ('Сыр', 45000, False, '10'),
 }
 ORDER = {'orderId': 'order-1', 'createdAt': '2026-01-01T09:00:00+00:00', 'status': 'closed',
          'calculation': {'finalCost': '99000', 'items': [
@@ -27,11 +29,21 @@ ORDER = {'orderId': 'order-1', 'createdAt': '2026-01-01T09:00:00+00:00', 'status
              {'name': 'Хлеб', 'count': 1, 'cost': '4500', 'productId': 'bread'},
              {'name': 'Каймак', 'count': 5, 'cost': '20990', 'productId': 'kaymak'}]},
          'contact': {'phone': 'secret'}}
+FRACTIONAL_ORDER = {'orderId': 'order-2', 'createdAt': '2026-02-01T09:00:00+00:00', 'status': 'closed',
+                    'calculation': {'finalCost': '52000', 'items': [
+                        {'name': 'Сыр', 'count': 1.5, 'cost': '45000', 'productId': 'cheese'},
+                        {'name': 'Молоко', 'count': 2, 'cost': '14990', 'productId': 'milk'}]},
+                    'contact': {'phone': 'secret'}}
+WEIGHT_ONLY_ORDER = {'orderId': 'order-3', 'createdAt': '2026-03-01T09:00:00+00:00', 'status': 'closed',
+                     'calculation': {'finalCost': '22500', 'items': [
+                         {'name': 'Сыр', 'count': 0.5, 'cost': '22500', 'productId': 'cheese'}]},
+                     'contact': {'phone': 'secret'}}
 
 
 class FakeLavka:
     def __init__(self):
         self.cart, self.version, self.updates = {}, 1, []
+        self.orders = [ORDER]
 
     def cart_body(self):
         items = []
@@ -70,7 +82,7 @@ class FakeLavka:
             self.version += 1
             return httpx.Response(200, json={})
         if path.endswith('/order-log/v1/retrieve'):
-            return httpx.Response(200, json={'orders': [ORDER]})
+            return httpx.Response(200, json={'orders': self.orders})
         if path.endswith('/v1/product'):
             return httpx.Response(200, json={'product': {
                 'id': body['productId'], 'title': 'Кар\xadто\xadфель', 'brand': 'Example Farm', 'currentPrice': 16990, 'amount': '800 г',
@@ -118,7 +130,9 @@ async def test_add_to_cart_by_name_in_one_update_and_reports_problems(lavka):
     assert lavka.updates[1] == {'kaymak': 3}
     assert result['not_found'] == ['хлеб', 'ананас']
     assert result['limited'] == [{'title': 'Каймак', 'requested': 4, 'max': 3}]
-    assert {(a['title'], a['quantity']) for a in result['added']} == {('Молоко Example 2,5%', 2), ('Каймак', 3), ('Яйца', 2), ('Сметана', 1)}
+    assert {(a['title'], a['added'], a['in_cart']) for a in result['added']} == {
+        ('Молоко Example 2,5%', 2, 2), ('Каймак', 3, 3), ('Яйца', 1, 2), ('Сметана', 1, 1)}
+    assert result['skipped'] == []
     assert not any('Йогурт' in i['title'] for i in result['cart']['items'])
     # "молоко" matches oat milk first, but the milk you ordered before wins.
     assert result['needs_choice'] == [{'query': 'йогурт', 'quantity': 3, 'options': [
@@ -132,6 +146,8 @@ async def test_repeat_last_order_drops_what_the_store_cannot_sell(lavka):
     assert lavka.updates == [{'milk': 2, 'bread': 1, 'kaymak': 5}, {'bread': 0, 'kaymak': 3}]
     assert result['order'] == {'order_id': 'order-1', 'created_at': '2026-01-01T09:00:00+00:00', 'total_uzs': '99000'}
     assert result['unavailable'] == ['Хлеб'] and result['limited'][0]['max'] == 3
+    assert result['skipped'] == []
+    assert {(a['title'], a['added'], a['in_cart']) for a in result['added']} == {('Молоко Example 2,5%', 2, 2), ('Каймак', 3, 3)}
     assert lavka.cart == {'milk': 2, 'kaymak': 3}
     assert result['cart']['available_for_checkout'] is True and 'secret' not in json.dumps(result)
 
@@ -142,6 +158,53 @@ async def test_set_cart_quantity_needs_no_price_or_coordinates(lavka):
     assert lavka.updates == [{'milk': 3}]
     assert result['items'][0] == {'id': 'milk', 'title': 'Молоко Example 2,5%', 'quantity': '3', 'price_uzs': '15990', 'pack': '1 шт', 'available': True}
     assert (result['delivery_uzs'], result['eta']) == ('10', '15 мин')
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_reports_the_fifty_per_line_cap_for_summed_requests(lavka):
+    result = await cart.add_to_cart([{'product_id': 'water', 'quantity': 30}, {'product_id': 'water', 'quantity': 30}])
+    assert lavka.updates == [{'water': 50}]
+    assert result['limited'] == [{'title': 'Вода', 'requested': 60, 'max': 50}]
+    assert result['added'] == [{'product_id': 'water', 'title': 'Вода', 'added': 50, 'in_cart': 50}]
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_reports_the_fifty_per_line_cap_above_an_existing_quantity(lavka):
+    lavka.cart = {'water': 45}
+    result = await cart.add_to_cart([{'product_id': 'water', 'quantity': 10}])
+    assert lavka.updates == [{'water': 50}]
+    assert result['limited'] == [{'title': 'Вода', 'requested': 55, 'max': 50}]
+    assert result['added'] == [{'product_id': 'water', 'title': 'Вода', 'added': 5, 'in_cart': 50}]
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_skips_an_existing_fractional_weight_item(lavka):
+    lavka.cart = {'cheese': 1.5}
+    result = await cart.add_to_cart([{'product_id': 'cheese', 'quantity': 1}])
+    assert lavka.updates == []
+    assert result['skipped'] == [{'title': 'Сыр', 'reason': 'Cart already holds a fractional (weight) quantity; it was not changed'}]
+    assert result['added'] == []
+    assert result['cart']['items'][0]['quantity'] == '1.5'
+
+
+@pytest.mark.asyncio
+async def test_repeat_order_skips_fractional_historical_quantities(lavka):
+    lavka.orders = [FRACTIONAL_ORDER]
+    result = await cart.repeat_order('order-2')
+    assert lavka.updates == [{'milk': 2}]
+    assert result['skipped'] == [{'title': 'Сыр',
+                                  'reason': 'Historical quantity is fractional (weight item); it cannot be repeated as a unit line'}]
+    assert result['added'] == [{'product_id': 'milk', 'title': 'Молоко Example 2,5%', 'added': 2, 'in_cart': 2}]
+    assert 'secret' not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+async def test_repeat_order_of_only_weight_items_writes_nothing(lavka):
+    lavka.orders = [WEIGHT_ONLY_ORDER]
+    result = await cart.repeat_order('order-3')
+    assert lavka.updates == []
+    assert result['added'] == [] and result['skipped'][0]['title'] == 'Сыр'
+    assert result['cart']['items'] == []
 
 
 @pytest.mark.asyncio
@@ -167,13 +230,14 @@ async def test_preview_order_defaults_to_session_address_and_only_card(lavka, mo
             seen['location'] = location
         async def lookup(self):
             return type('R', (), {'masked_cards': ['**** 4242']})()
-    async def preview(http, index, suffix):
+    async def preview(http, index, suffix, expected=None):
+        seen['expected'] = expected
         return {'index': index, 'suffix': suffix}
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
     assert await order_tools.preview_order() == {'index': 1, 'suffix': '4242'}
-    assert seen['location'] == HOME
+    assert seen['location'] == HOME and seen['expected'] == 'a-home'
 
 
 @pytest.mark.asyncio
@@ -185,7 +249,7 @@ async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
             pass
         async def lookup(self):
             return type('R', (), {'masked_cards': ['**** 1111', '**** 2222']})()
-    async def preview(http, index, suffix):
+    async def preview(http, index, suffix, expected=None):
         return {'suffix': suffix}
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
@@ -194,6 +258,24 @@ async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
     assert asked['preview'] is False and asked['cards'] == ['**** 1111', '**** 2222']
     assert await order_tools.preview_order(card_last4='2222') == {'suffix': '2222'}
     assert await order_tools.preview_order() == {'suffix': '2222'}
+
+
+@pytest.mark.asyncio
+async def test_preview_order_without_saved_cards_returns_empty_cards(lavka, monkeypatch):
+    async def addresses(http):
+        return None, [{'addressId': 'a-home', 'address': {'location': HOME}}]
+    class Cards:
+        def __init__(self, http, props, location):
+            pass
+        async def lookup(self):
+            return type('R', (), {'masked_cards': []})()
+    async def preview(http, index, suffix, expected=None):
+        pytest.fail('a preview without a card must not be attempted')
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(orders, 'preview', preview)
+    monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
+    result = await order_tools.preview_order()
+    assert result == {'preview': False, 'cards': []}
 
 
 @pytest.mark.asyncio
