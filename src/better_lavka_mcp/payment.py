@@ -86,7 +86,8 @@ async def payment_status(http, props, order_id):
     payload = data.get('payload')
     payload = payload if isinstance(payload, dict) else {}
     redirect = payload.get('redirectUrl') or data.get('redirectUrl')
-    result = {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None}
+    result = {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None,
+              'payload_type': payload.get('type') if isinstance(payload.get('type'), str) else None}
     # The site shows this title and text to the user when a card payment fails.
     if payload.get('type') == 'error':
         result['payment_error'] = {k: payload[src].strip()[:200] for k, src in (('title', 'errorTitle'), ('text', 'errorSubtitle'))

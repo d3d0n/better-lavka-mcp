@@ -332,13 +332,21 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
         # Lavka's own answer, minus ids: which fields it sent and how the site should track payment.
         result['lavka_response'] = {'fields': sorted(str(k) for k in data)[:30],
                                     **({'track_payment': data['trackPayment']} if isinstance(data.get('trackPayment'), dict) else {})}
-        result.update(await _await_payment(http, props, data['orderId']))
+        sent_at = time.monotonic()
+        payment = await _await_payment(http, props, data['orderId'], sent_at)
+        trace = payment.pop('trace')
+        result.update(payment)
         if result.get('payment_status') not in PAYMENT_OK:
             from better_lavka_mcp.orders.tracking import tracking_state
             try:
                 result['tracking'] = (await tracking_state(http, props, [data['orderId']])).get(data['orderId'])
             except UpstreamError:
                 result['tracking'] = {'state': 'unknown'}
+        from better_lavka_mcp.orders import diagnostics
+        saved = diagnostics.record({'order_id': data['orderId'], 'submit_response': diagnostics.redact(data),
+                                    'request_fields': sorted(payload), 'payment_trace': trace, 'tracking': result.get('tracking')})
+        if saved:
+            result['diagnostics_file'] = saved
     elif 400 <= response.status_code <= 599:
         projection = sanitize_rejection(response.status_code, data)
         result.update(projection)
@@ -376,21 +384,30 @@ PAYMENT_OK = frozenset({'success', 'paid', 'hold', 'need_to_skip'})
 PAYMENT_POLL_INTERVAL = 2.0
 
 
-async def _await_payment(http, props, order_id):
-    """Poll payment status briefly after submit; never resubmits and never raises."""
+async def _await_payment(http, props, order_id, started=None):
+    """Poll payment status briefly after submit; never resubmits and never raises.
+
+    'trace' lists every poll (seconds since submit, status, payload type, whether a 3-D Secure link came) for diagnostics."""
     import asyncio
 
     from better_lavka_mcp.payment import TERMINAL_PAYMENT_STATUSES, payment_status
+    started = time.monotonic() if started is None else started
     last = {'payment_status': 'unknown', 'redirect_url': None}
+    trace = []
     for attempt in range(PAYMENT_POLL_ATTEMPTS):
         if attempt:
             await asyncio.sleep(PAYMENT_POLL_INTERVAL)
         try:
             last = await payment_status(http, props, order_id)
-        except Exception:
+        except Exception as error:
+            trace.append({'after_s': round(time.monotonic() - started, 1), 'error': type(error).__name__})
             continue
+        trace.append({'after_s': round(time.monotonic() - started, 1), 'status': last['payment_status'],
+                      'payload_type': last.get('payload_type'), 'redirect': bool(last['redirect_url']),
+                      **({'error': last['payment_error']} if last.get('payment_error') else {})})
         if last['payment_status'] in TERMINAL_PAYMENT_STATUSES or last['redirect_url']:
             break
+    last = {**last, 'trace': trace}
     if last['redirect_url']:
         last['note'] = 'The bank asks for 3-D Secure: open redirect_url to confirm the payment, then check get_payment_status.'
     elif last['payment_status'] not in TERMINAL_PAYMENT_STATUSES:

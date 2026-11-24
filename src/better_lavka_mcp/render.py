@@ -306,6 +306,8 @@ def _submit(r):
                 lines.append(_tracking(r['tracking']))
             lines.append('If the card was charged, Lavka returns the money when it cancels the order; the user can check their bank app. '
                          'Do not submit again on your own: ask the user first, and they may want another card.')
+            if r.get('diagnostics_file'):
+                lines.append(f"Lavka's answers to this checkout are saved, without ids or links, in {r['diagnostics_file']}.")
             return '\n'.join(lines)
         lines = [f"**Order placed** · {ref(r['order_id'])}."]
         lines.append(_payment(r))

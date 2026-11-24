@@ -294,6 +294,12 @@ async def test_submit_request_matches_the_lavka_site(tmp_path, monkeypatch):
     # Earns cashback like the site does, never spends it.
     assert body["cashback"] == {"walletId": "w/1"} and body["serviceFeeV2"] == "3990" and "serviceFee" not in body
     assert result["lavka_response"] == {"fields": ["orderId", "trackPayment"], "track_payment": {"modalPlace": "none"}}
+    # A local record of Lavka's answer and every payment poll, without ids, tokens or links.
+    from better_lavka_mcp.orders import diagnostics
+    entry = json.loads(diagnostics.PATH.read_text().splitlines()[-1])
+    assert entry["submit_response"] == {"orderId": "str", "trackPayment": {"modalPlace": "none"}}
+    assert [(p["status"], p["redirect"]) for p in entry["payment_trace"]] == [("success", False)]
+    assert "cashback" in entry["request_fields"] and "w/1" not in diagnostics.PATH.read_text()
 
 
 async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):

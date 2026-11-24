@@ -64,6 +64,7 @@
 !/src/better_lavka_mcp/orders/rejection.py
 !/src/better_lavka_mcp/orders/submit.py
 !/src/better_lavka_mcp/orders/tracking.py
+!/src/better_lavka_mcp/orders/diagnostics.py
 !/src/better_lavka_mcp/tools/
 /src/better_lavka_mcp/tools/*
 !/src/better_lavka_mcp/tools/__init__.py

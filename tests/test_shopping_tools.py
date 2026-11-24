@@ -226,7 +226,8 @@ async def test_get_product_parses_nutrition_and_details(lavka):
 
 @pytest.mark.asyncio
 async def test_payment_status_returns_3ds_link(lavka):
-    assert await account.get_payment_status('order-1') == {'payment_status': 'wait_user_action', 'redirect_url': 'https://trust.example/3ds'}
+    result = await account.get_payment_status('order-1')
+    assert (result['payment_status'], result['redirect_url']) == ('wait_user_action', 'https://trust.example/3ds')
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-11-24
+
+### Added
+- Each checkout leaves a local, owner-only record in `checkout-diagnostics.jsonl`: the shape of Lavka's answer to the submit, the request fields sent, every payment-status poll with its timing, and the tracking verdict. Ids, tokens, links and addresses are not kept. A failed payment's answer points to it.
+
 ## [0.8.1] — 2026-11-24
 
 ### Fixed
@@ -167,7 +172,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...v0.7.3
