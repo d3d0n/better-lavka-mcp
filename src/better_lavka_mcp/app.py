@@ -102,17 +102,40 @@ async def select_country(country: str) -> dict:
                         'RU/KZ reads are anonymous; account, cart and checkout tools are UZ-only. Do not use them for this region.'))}
 
 
-# The delivery address chosen with use_address; remembered between sessions.
+# The delivery address chosen with use_address; remembered between sessions, for the account that chose it.
 _delivery = None
 
 
+def account_fingerprint(identity):
+    """Login cookies with hashed values: comparable with same_account, but no credential lands in preferences."""
+    import hashlib
+    if not isinstance(identity, tuple):
+        return identity  # None or UNKNOWN_IDENTITY
+    return tuple((name, domain, hashlib.sha256(value.encode()).hexdigest()) for name, domain, value in identity)
+
+
+def _account_of(delivery):
+    account = delivery.get('account') if isinstance(delivery, dict) else None
+    return tuple(tuple(item) for item in account) if isinstance(account, list) and account else None
+
+
 def _current_delivery():
+    """The chosen address, only while the saved session is still the account that chose it.
+
+    Another server process may have signed in to a different account meanwhile, or a slow
+    use_address may have finished after that login: both leave an address of the old account."""
     global _delivery
+    from better_lavka_mcp.auth.qr import same_account, session_identity
     if _delivery is None:
         from better_lavka_mcp import preferences
         saved = preferences.load().get('address')
         if isinstance(saved, dict) and isinstance(saved.get('location'), list) and len(saved['location']) == 2:
             _delivery = saved
+    if _delivery is not None:
+        # Unknown on either side (no session yet, an address saved by an older version) proves nothing: keep it.
+        chosen_by, signed_in = _account_of(_delivery), account_fingerprint(session_identity(client.STATE))
+        if chosen_by and isinstance(signed_in, tuple) and not same_account(chosen_by, signed_in):
+            _delivery = None
     return _delivery
 
 

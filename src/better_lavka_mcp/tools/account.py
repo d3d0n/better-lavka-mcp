@@ -1,7 +1,7 @@
 """Account and history tools: saved addresses, cards, orders and the tracking feed."""
 from better_lavka_mcp import client
 from better_lavka_mcp.aliases import resolve
-from better_lavka_mcp.app import _location, _remember_delivery, tool, uz_only
+from better_lavka_mcp.app import _location, _remember_delivery, account_fingerprint, tool, uz_only
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.orders import submit as orders
@@ -19,8 +19,10 @@ async def use_address(address: str) -> dict:
     """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
     if not isinstance(address, str) or not address.strip():
         raise ValueError('Name the saved address, for example "home"')
+    from better_lavka_mcp.auth.qr import cookie_identity
     async with client.create_http() as http:
         _, entries = await orders.addresses(http)
+        account = cookie_identity(http.cookies.jar)
     query = address.strip().casefold()
     aliases = {'home': ('дом', 'uy'), 'дом': ('home', 'uy'), 'uy': ('home', 'дом'),
                'work': ('работа', 'ish'), 'работа': ('work', 'ish'), 'ish': ('work', 'работа')}
@@ -47,7 +49,8 @@ async def use_address(address: str) -> dict:
     location = entries[index]['address'].get('location')
     if not isinstance(location, list) or len(location) != 2:
         raise ValueError('This saved address has no map point; choose another one')
-    delivery = {'address_id': entries[index].get('addressId'), 'location': location, **_address_summary(entries[index], index)}
+    delivery = {'address_id': entries[index].get('addressId'), 'location': location, **_address_summary(entries[index], index),
+                'account': [list(item) for item in account_fingerprint(account) or ()]}
     _remember_delivery(delivery)
     from better_lavka_mcp import preferences
     preferences.update(address=delivery)

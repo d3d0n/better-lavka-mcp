@@ -44,6 +44,52 @@ async def test_chosen_address_is_remembered_for_the_next_session(saved, monkeypa
     assert 'private' not in preferences.PATH.read_text()  # flat, door code etc. are not stored
 
 
+def _sign_in(login, session_id):
+    """Write the shared session file the way a QR login in any server process does."""
+    from better_lavka_mcp.auth.qr import save_session
+    http = httpx.AsyncClient()
+    http.cookies.set('Session_id', session_id, domain='.yandex.uz', path='/')
+    http.cookies.set('yandex_login', login, domain='.yandex.uz', path='/')
+    save_session(http, client.STATE)
+
+
+def _client_for(login, session_id):
+    def create():
+        http = httpx.AsyncClient()
+        http.cookies.set('Session_id', session_id, domain='.yandex.uz', path='/')
+        http.cookies.set('yandex_login', login, domain='.yandex.uz', path='/')
+        return http
+    return create
+
+
+@pytest.mark.asyncio
+async def test_address_of_the_previous_account_is_not_used_after_another_process_signs_in(saved, monkeypatch):
+    from better_lavka_mcp import preferences
+    _sign_in('alice', 'sid-a')
+    monkeypatch.setattr(client, 'create_http', _client_for('alice', 'sid-a'))
+    await account.use_address('home')
+    assert app._location() == [69.2, 41.3]
+    assert 'sid-a' not in preferences.PATH.read_text()  # only a hash of the login cookies is kept
+    # A second server process signs in to bob; this process still holds alice's address in memory.
+    _sign_in('bob', 'sid-b')
+    with pytest.raises(ValueError, match='No delivery address yet'):
+        app._location()
+    # Session_id is reissued on every login; the same login keeps its address.
+    _sign_in('alice', 'sid-a2')
+    await account.use_address('home')
+    _sign_in('alice', 'sid-a3')
+    assert app._location() == [69.2, 41.3]
+
+
+@pytest.mark.asyncio
+async def test_slow_use_address_finishing_after_a_login_does_not_carry_over(saved, monkeypatch):
+    _sign_in('bob', 'sid-b')
+    # use_address read alice's list with alice's cookies, then bob signed in before it saved.
+    monkeypatch.setattr(client, 'create_http', _client_for('alice', 'sid-a'))
+    await account.use_address('home')
+    monkeypatch.setattr(app, '_delivery', None)  # and in a fresh process too
+    assert app._current_delivery() is None
+
 @pytest.mark.asyncio
 async def test_use_address_returns_candidates_when_unclear(saved):
     result = await account.use_address('avenue')
