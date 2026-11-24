@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from better_lavka_mcp import app, client, render
+from better_lavka_mcp import aliases, app, client, render
 from better_lavka_mcp.orders import submit as orders
 from better_lavka_mcp.tools import account, cart, catalog
 from better_lavka_mcp.tools import orders as order_tools
@@ -45,6 +45,8 @@ class FakeLavka:
         self.cart, self.version, self.updates = {}, 1, []
         self.orders = [ORDER]
         self.stale = {}  # product id -> the old price its cart line still holds after Lavka repriced it
+        self.recents = []  # what the user bought here before, as Lavka's recents list returns it
+        self.favorites = []  # what the user hearted
 
     def cart_body(self):
         items = []
@@ -115,6 +117,19 @@ class FakeLavka:
                     {'value': {'type': 'subcategory', 'title': 'Яй\xadца'}, 'items': [{'id': 'eggs'}]}]}],
                 'products': [{'id': pid, 'title': CATALOG[pid][0], 'currentPrice': CATALOG[pid][1], 'amount': '1 шт', 'available': True}
                              for pid in ('milk', 'oatmilk', 'eggs')]})
+        if path.endswith(('/api/v1/user/recents', '/api/v1/user/favorites')):
+            # Live shape: what the user bought here (most recent first) or hearted.
+            assert body == {'position': {'location': HOME}}
+            ids = self.recents if path.endswith('recents') else self.favorites
+            return httpx.Response(200, json={'products': [
+                {'id': pid, 'title': CATALOG[pid][0], 'amount': '1 шт', 'available': True, 'quantity_limit': CATALOG[pid][3],
+                 'pricing': {'price': str(CATALOG[pid][1])}} for pid in ids]})
+        if path.endswith('/upsale/cart-item-substitutions'):
+            # Live shape (snake_case, pricing.price); the sold-out bread gets lepyoshka-like replacements.
+            assert body['product'] in CATALOG and body['position'] == {'location': HOME}
+            return httpx.Response(200, json={'items': [
+                {'id': 'water', 'title': 'Ле\xadпёш\xadка', 'amount': '240 г', 'available': True, 'quantity_limit': '10', 'pricing': {'price': '4990'}},
+                {'id': 'gone', 'title': 'Sold out too', 'available': False, 'pricing': {'price': '1'}}]})
         if path.endswith('/payments/v1/status'):
             return httpx.Response(200, json={'status': 'wait_user_action', 'payload': {'redirectUrl': 'https://trust.example/3ds'}})
         raise AssertionError(path)
@@ -125,6 +140,9 @@ def lavka(monkeypatch):
     fake = FakeLavka()
     monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handle)))
     monkeypatch.setattr(app, '_delivery', {'address_id': 'a-home', 'location': HOME, 'index': 0, 'label': 'Дом', 'short_address': 'Example street, 1'})
+    async def no_codes(http, index, expected_address_id, applied):  # coupon lookup has its own tests
+        return []
+    monkeypatch.setattr(order_tools, '_promo_codes', no_codes)
     return fake
 
 
@@ -241,7 +259,7 @@ async def test_preview_order_defaults_to_session_address_and_only_card(lavka, mo
             seen['location'] = location
         async def lookup(self):
             return type('R', (), {'masked_cards': ['**** 4242']})()
-    async def preview(http, index, suffix, expected=None):
+    async def preview(http, index, suffix, expected=None, flow=None):
         seen['expected'] = expected
         return {'index': index, 'suffix': suffix, 'preview_token': 't'}
     monkeypatch.setattr(orders, 'addresses', addresses)
@@ -260,7 +278,7 @@ async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
             pass
         async def lookup(self):
             return type('R', (), {'masked_cards': ['**** 1111', '**** 2222']})()
-    async def preview(http, index, suffix, expected=None):
+    async def preview(http, index, suffix, expected=None, flow=None):
         return {'suffix': suffix, 'preview_token': 't'}
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
@@ -280,7 +298,7 @@ async def test_preview_order_without_saved_cards_returns_empty_cards(lavka, monk
             pass
         async def lookup(self):
             return type('R', (), {'masked_cards': []})()
-    async def preview(http, index, suffix, expected=None):
+    async def preview(http, index, suffix, expected=None, flow=None):
         pytest.fail('a preview without a card must not be attempted')
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
@@ -314,7 +332,7 @@ async def test_preview_accepts_prices_lavka_changed_since_items_were_added(lavka
     async def addresses(http):
         return None, [{'addressId': 'a-home', 'address': {'location': HOME}}]
     calls = []
-    async def preview(http, index, suffix, expected=None):
+    async def preview(http, index, suffix, expected=None, flow=None):
         calls.append(dict(lavka.stale))
         if lavka.stale:
             raise orders.CartNotReady('Nonempty available cart and exact total required')
@@ -353,3 +371,63 @@ def test_search_marks_sold_out_and_running_low_only():
     text = render.render('search_products', {'products': products})
     assert 'Морковь — 15 990 сум, sold out' in text and 'Кефир — 9 990 сум, running low, up to 2 per order' in text
     assert 'Хлеб — 4 990 сум ·' in text  # plenty: no stock noise
+
+
+@pytest.mark.asyncio
+async def test_repeat_order_leaves_out_lavkas_bags(lavka):
+    # Live: a repeated order tried to add "Пакет «Яндекс Лавка»" and reported it sold out.
+    lavka.orders = [{**ORDER, 'calculation': {**ORDER['calculation'], 'items': ORDER['calculation']['items'] + [
+        {'name': 'Пакет «Яндекс Лавка»', 'count': 2, 'cost': '650', 'productId': 'bag:st-sa-bag'}]}}]
+    result = await cart.repeat_order('last')
+    assert all('bag' not in line for update in lavka.updates for line in update)
+    assert 'Пакет' not in render.render('repeat_order', result)
+
+
+@pytest.mark.asyncio
+async def test_sold_out_items_come_with_lavkas_replacements(lavka):
+    result = await cart.add_to_cart([{'product_id': 'bread'}])
+    text = render.render('add_to_cart', result)
+    assert '**Sold out, left out:** Хлеб' in text
+    assert f"Lavka suggests instead of Хлеб: Лепёшка — 4 990 сум, 240 г · `{aliases.short('water')}`." in text
+    assert 'Sold out too' not in text  # Lavka's own unavailable suggestions are left out
+
+
+@pytest.mark.asyncio
+async def test_cart_line_the_depot_cannot_fill_lists_replacements(lavka):
+    lavka.cart = {'kaymak': 5}  # quantityLimit 3
+    text = render.render('get_cart', await cart.get_cart())
+    assert '**only 3 can be ordered now**' in text and 'Lavka suggests instead: Лепёшка — 4 990 сум, 240 г' in text
+
+
+@pytest.mark.asyncio
+async def test_as_usual_lists_what_the_user_buys_and_search_marks_it(lavka):
+    from better_lavka_mcp.tools import storefront
+    lavka.recents, lavka.favorites = ['yogurt-peach', 'milk'], ['cheese', 'milk']
+    usual = render.render('search_products', await storefront.search_products(''))
+    assert usual.splitlines()[0] == 'What the user usually buys here (favorites first, then most recently bought):'
+    # A hearted product never bought still shows; one both hearted and bought appears once.
+    order = [usual.index(t) for t in ('Сыр', 'Молоко Example 2,5%', 'Йогурт персиковый')]
+    assert order == sorted(order) and usual.count('Молоко Example 2,5%') == 1
+    assert 'Сыр — 45 000 сум, 1 шт, favorite ·' in usual and 'bought before' not in usual
+    found = render.render('search_products', await storefront.search_products('йогурт'))
+    assert 'Йогурт персиковый — 8 990 сум, bought before' in found and 'Йогурт клубничный — 9 990 сум ·' in found
+    hearted = render.render('search_products', await storefront.search_products('сыр'))
+    assert 'Сыр — 45 000 сум, favorite ·' in hearted and 'bought before' not in hearted
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_by_name_picks_what_the_user_bought_here_before(lavka):
+    lavka.recents = ['yogurt-peach']
+    result = await cart.add_to_cart([{'query': 'йогурт'}])
+    assert [a['product_id'] for a in result['added']] == ['yogurt-peach'] and not result['needs_choice']
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_never_adds_a_result_of_shortened_words(lavka):
+    # "молоко без лактозы" finds nothing; the fallback "молоко" must not quietly add ordinary milk, bought before or not.
+    lavka.recents = ['milk']
+    result = await cart.add_to_cart([{'query': 'молоко без лактозы'}])
+    assert result['added'] == [] and lavka.updates == []
+    assert result['needs_choice'][0]['searched_for'] == 'молоко'
+    text = render.render('add_to_cart', result)
+    assert 'Lavka found nothing for these exact words, only for «молоко», so nothing was added.' in text

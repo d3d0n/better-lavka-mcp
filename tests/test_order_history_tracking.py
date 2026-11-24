@@ -50,3 +50,16 @@ async def test_history_still_answers_when_tracking_does_not(monkeypatch, feed_st
     result = await account.list_order_history(2)
     assert [o['order_id'] for o in result['orders']] == ['o-live', 'o-old'] and result['tracking'] == 'unknown'
     assert "Live status: unknown (Lavka's tracking didn't answer)" in render.render('list_order_history', result)
+
+
+@pytest.mark.asyncio
+async def test_an_order_on_its_way_is_shown_even_when_it_is_not_on_the_page(monkeypatch):
+    # limit=1 returns only the newest order; the delivering one is older but must still be visible.
+    feed = [{**FEED[0], 'id': 'o-old', 'trackingInfo': {'title': 'Ещё ~3 минуты', 'subtitle': 'Курьер в пути'}},
+            {'id': 'o-done', 'status': 'closed', 'resolution': 'succeeded', 'trackingInfo': {'title': 'Заказ доставлен'}}]
+    monkeypatch.setattr(client, 'create_http', _lavka(feed=feed))
+    result = await account.list_order_history(1)
+    assert [o['order_id'] for o in result['orders']] == ['o-live'] and result['next_older_than'] == 'o-live'
+    assert [t['order_id'] for t in result['active_elsewhere']] == ['o-old']  # closed ones elsewhere stay out
+    text = render.render('list_order_history', result)
+    assert 'Also in progress, not on this page:' in text and '“Ещё ~3 минуты — Курьер в пути” (delivering)' in text

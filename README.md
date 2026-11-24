@@ -120,7 +120,7 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 | Tool | What it does |
 |---|---|
 | `use_address` | Pick the delivery address by its saved name ("Home", "Work"); remembered next time |
-| `search_products` | Find products and prices |
+| `search_products` | Find products with prices, discounts and stock; empty query = what you usually buy |
 | `list_categories` | The catalog: groups and categories |
 | `get_category_products` | Shelves and products in one category |
 | `get_product` | Product card: price, pack, nutrition, ingredients, shelf life |
@@ -128,7 +128,7 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 | `repeat_order` | Put a past order back into the cart |
 | `get_cart` | What's in the cart, delivery and total |
 | `set_cart_quantity` | Change or remove one item |
-| `preview_order` | Address, card, items and total before ordering |
+| `preview_order` | Address, card, items and total before ordering; promo codes and Plus points |
 | `submit_order` | Place the order |
 | `list_order_history` | Orders with their items and, while Lavka tracks them, live status: minutes left, courier distance |
 | `get_order` | One order in full: fees, payment status (3-D Secure link), tracking |

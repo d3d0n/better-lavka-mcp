@@ -8,7 +8,7 @@ from better_lavka_mcp import client
 from better_lavka_mcp.aliases import resolve
 from better_lavka_mcp.app import _location, tool, uz_only
 from better_lavka_mcp.cart import CartClient
-from better_lavka_mcp.client import _number, clean_text, stock
+from better_lavka_mcp.client import _number, clean_text, is_service_line, stock
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.headers import USER_AGENT
 
@@ -26,8 +26,40 @@ async def _cart_client(http, location, props=None):
     return client_, CartClient(http, props, location, info['currencySign'])
 
 
+def _cannot_fill(item):
+    have = item.get('orderable')
+    want = _quantity(item.get('quantity'))
+    return item.get('available') is False or have == 0 or (have is not None and want is not None and want > have)
+
+
+async def _left_out_replacements(lavka, location, result):
+    """Lavka's replacements for items add_to_cart/repeat_order left out as sold out (first three)."""
+    offers = []
+    for product_id, title in result.pop('sold_out', [])[:3]:
+        try:
+            options = await lavka.replacements(product_id, location)
+        except UpstreamError:
+            continue
+        if options:
+            offers.append({'for': title, 'options': options})
+    if offers:
+        result['replacements'] = offers
+    return result
+
+
+async def _with_replacements(lavka, location, view):
+    """Add Lavka's replacements to the lines the depot can't fill (at most three lines, best effort)."""
+    for item in [i for i in view.get('items') or [] if _cannot_fill(i)][:3]:
+        try:
+            item['replacements'] = await lavka.replacements(item['id'], location)
+        except UpstreamError:
+            pass
+    return view
+
+
 def _cart_view(cart):
     from better_lavka_mcp.cart import actual_prices, price_changes
+    from better_lavka_mcp.orders.submit import plus_points
     items = []
     current = actual_prices(cart)  # a repriced line still carries its old price until it is re-saved
     for item in cart['items']:
@@ -43,7 +75,8 @@ def _cart_view(cart):
             'eta': conditions.get('eta'),
             'available_for_checkout': cart.get('availableForCheckout'),
             'checkout_unavailable_reason': cart.get('checkoutUnavailableReason'),
-            'price_changes': [{**change, 'title': clean_text(change['title'])} for change in price_changes(cart)]}
+            'price_changes': [{**change, 'title': clean_text(change['title'])} for change in price_changes(cart)],
+            'plus_points': plus_points(cart)}
 
 
 def _quantity(value):
@@ -72,7 +105,7 @@ async def _add_products(cart_client, wanted, titles):
 async def _add_and_correct(cart_client, wanted, titles):
     fresh, outcomes = await cart_client.add_items(dict(wanted))
     by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
-    fixes, unavailable, limited, skipped = {}, [], [], []
+    fixes, unavailable, limited, skipped, sold_out_ids = {}, [], [], [], []
     for pid, outcome in outcomes.items():
         item = by_id.get(pid, {})
         title = clean_text(item.get('title')) or titles.get(pid) or pid
@@ -85,6 +118,7 @@ async def _add_and_correct(cart_client, wanted, titles):
         if item.get('isUnavailableOnDepot') is True or limit == 0:
             fixes[pid] = 0
             unavailable.append(title)
+            sold_out_ids.append((pid, title))
         elif limit is not None and outcome['target'] > Decimal(str(limit)):
             fixes[pid] = int(limit)
             limited.append({'title': title, 'requested': _display(outcome['target']), 'max': _display(Decimal(str(limit)))})
@@ -103,27 +137,28 @@ async def _add_and_correct(cart_client, wanted, titles):
         if change > 0 and after > 0:
             added.append({'product_id': pid, 'title': clean_text(item.get('title')) or titles.get(pid) or pid,
                           'added': _display(change), 'in_cart': _display(after)})
-    return {'added': added, 'unavailable': unavailable, 'limited': limited, 'skipped': skipped, 'cart': _cart_view(fresh)}
+    return {'added': added, 'unavailable': unavailable, 'limited': limited, 'skipped': skipped, 'cart': _cart_view(fresh),
+            'sold_out': sold_out_ids}
 
 
 @tool()
 @uz_only
 async def get_cart(longitude: float | None = None, latitude: float | None = None) -> dict:
-    """What's in the cart: items, quantities, prices, delivery cost, ETA and total in UZS, for the address chosen with use_address (or at longitude, latitude)."""
+    """The cart: items, prices, delivery, total, Plus points; lines the depot can't fill come with Lavka's replacements."""
     async with client.create_http() as http:
         location = _location(http, longitude, latitude)
-        _, cart_client = await _cart_client(http, location)
-        return _cart_view(await cart_client.retrieve())
+        lavka, cart_client = await _cart_client(http, location)
+        return await _with_replacements(lavka, location, _cart_view(await cart_client.retrieve()))
 
 
 @tool()
 @uz_only
 async def set_cart_quantity(product_id: str, quantity: int, longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Change the cart: set product_id to an exact quantity (0 removes it). Lavka applies its current price. Returns the updated cart."""
+    """Set one product to an exact quantity (0 removes it). Returns the cart."""
     async with client.create_http() as http:
         location = _location(http, longitude, latitude)
-        _, cart_client = await _cart_client(http, location)
-        return _cart_view(await cart_client.set_items({resolve(product_id): quantity}))
+        lavka, cart_client = await _cart_client(http, location)
+        return await _with_replacements(lavka, location, _cart_view(await cart_client.set_items({resolve(product_id): quantity})))
 
 
 class CartRequest(TypedDict, total=False):
@@ -135,7 +170,7 @@ class CartRequest(TypedDict, total=False):
 @tool()
 @uz_only
 async def add_to_cart(items: list[CartRequest], longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query adds what you ordered before, or the only match; otherwise nothing is added for it and needs_choice lists up to 5 options to pick from — ask the user, then call again with the product_id. Reports what was added, needs a choice, not found, unavailable or capped at the store limit."""
+    """Add a list in one call: items like {"query": "молоко 2.5%", "quantity": 2} or {"product_id": "…"}. A query takes what the user bought before or the only match; otherwise needs_choice lists options — ask, then add by product_id."""
     if not isinstance(items, list) or not items or len(items) > 50:
         raise ValueError('Pass 1–50 items')
     wanted, titles, not_found, needs_choice = {}, {}, [], []
@@ -154,15 +189,17 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
                 if not isinstance(query, str) or not query.strip():
                     raise ValueError('Each item needs a query or a product_id')
                 if bought is None:
-                    bought = await _bought_before(lavka)
+                    bought = await _bought_before(lavka, tuple(location))
                 found = await lavka.search(query, 8, tuple(location))
                 candidates = [p for p in found['products'] if p.get('available') and p.get('id')]
                 if not candidates:
                     not_found.append(query)
                     continue
-                match = next((p for p in candidates if p['id'] in bought), candidates[0] if len(candidates) == 1 else None)
+                # Results for shortened words are a guess ("молоко без лактозы" → "молоко"): never add one unasked.
+                broadened = found.get('searched_for')
+                match = None if broadened else next((p for p in candidates if p['id'] in bought), candidates[0] if len(candidates) == 1 else None)
                 if match is None:
-                    needs_choice.append({'query': query, 'quantity': quantity,
+                    needs_choice.append({'query': query, 'quantity': quantity, **({'searched_for': broadened} if broadened else {}),
                                          'options': [{'product_id': p['id'], 'title': p['title'], 'price_uzs': p['price'], 'pack': p.get('quantity')}
                                                      for p in candidates[:5]]})
                     continue
@@ -170,23 +207,31 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
             wanted[product_id] = wanted.get(product_id, 0) + quantity
         if not wanted:
             return {'added': [], 'needs_choice': needs_choice, 'not_found': not_found, 'unavailable': [], 'limited': [], 'skipped': [], 'cart': _cart_view(await cart_client.retrieve())}
-        result = await _add_products(cart_client, wanted, titles)
+        result = await _left_out_replacements(lavka, location, await _add_products(cart_client, wanted, titles))
     return {**result, 'needs_choice': needs_choice, 'not_found': not_found}
 
 
-async def _bought_before(lavka):
-    """Product ids from recent orders; an unreadable history just means no preference."""
-    try:
-        history = await lavka.order_history(21)
-    except (UpstreamError, ValueError):
-        return set()
-    return {line['product_id'] for order in history['orders'] for line in order['items']}
+async def _bought_before(lavka, location):
+    """Product ids the user bought before: Lavka's list for this address plus the last 21 orders.
+
+    Either source may fail; an unreadable one just adds no preference."""
+    import asyncio
+    recents, history = await asyncio.gather(lavka.recents(location), lavka.order_history(21), return_exceptions=True)
+    ids = set()
+    if isinstance(recents, list):
+        ids |= {p['id'] for p in recents}
+    if isinstance(history, dict):
+        ids |= {line['product_id'] for order in history['orders'] for line in order['items']}
+    for outcome in (recents, history):
+        if isinstance(outcome, BaseException) and not isinstance(outcome, Exception):
+            raise outcome
+    return ids
 
 
 @tool()
 @uz_only
 async def repeat_order(order_id: str = 'last', longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Put everything from a past order back into the cart (order_id from list_order_history, or "last"). Lavka applies today's prices; items the store no longer has are left out and listed."""
+    """Put a past order back into the cart (order_id, or "last") at today's prices; sold-out items are listed with replacements."""
     async with client.create_http() as http:
         location = _location(http, longitude, latitude)
         lavka, cart_client = await _cart_client(http, location)
@@ -198,6 +243,8 @@ async def repeat_order(order_id: str = 'last', longitude: float | None = None, l
         order = await lavka.order(resolve(order_id))
         wanted, titles, skipped = {}, {}, []
         for line in order['items']:
+            if is_service_line(line['product_id']):
+                continue  # bags: Lavka adds them by itself and doesn't sell them as a product
             quantity = _quantity(line.get('quantity'))
             if quantity is not None and quantity != quantity.to_integral_value():
                 skipped.append({'title': line['name'],
@@ -211,6 +258,6 @@ async def repeat_order(order_id: str = 'last', longitude: float | None = None, l
             result = {'added': [], 'unavailable': [], 'limited': [], 'skipped': skipped,
                       'cart': _cart_view(await cart_client.retrieve())}
         else:
-            result = await _add_products(cart_client, wanted, titles)
+            result = await _left_out_replacements(lavka, location, await _add_products(cart_client, wanted, titles))
             result['skipped'] = skipped + result['skipped']
     return {'order': {k: order[k] for k in ('order_id', 'created_at', 'total_uzs')}, **result}

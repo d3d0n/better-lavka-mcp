@@ -30,7 +30,7 @@ async def _latest_order(lavka):
 
 @tool()
 async def get_storefront_status(country: str | None = None) -> dict:
-    """Start here. Read-only: whether Lavka is open and its delivery time; in Uzbekistan also whether you are signed in, the chosen delivery address, what is in the cart and the latest order with its status. Parts Lavka didn't answer are marked unknown. Not a quote and not proof of delivery coverage at an address."""
+    """Start here: is Lavka open, delivery time, sign-in, chosen address, cart and latest order."""
     country = selected_region() if country is None else country
     if country not in ('UZ', 'RU', 'KZ'):
         raise ValueError('Supported countries: RU, KZ, UZ')
@@ -59,8 +59,8 @@ async def get_storefront_status(country: str | None = None) -> dict:
 
 
 @tool()
-async def search_products(query: str, limit: int = 20, longitude: float | None = None, latitude: float | None = None, country: str | None = None) -> dict:
-    """Find products and prices. In Uzbekistan it searches at the address chosen with use_address (or at longitude, latitude); RU and KZ need coordinates and search anonymously. limit is 1–50."""
+async def search_products(query: str = '', limit: int = 20, longitude: float | None = None, latitude: float | None = None, country: str | None = None) -> dict:
+    """Find products with price, discount and stock; favorites and ones bought before are marked. Empty query = the user's favorites and usual buys. RU/KZ: pass country and coordinates. limit 1–50."""
     if (longitude is None) != (latitude is None):
         raise ValueError("Both longitude and latitude are required")
     country = selected_region() if country is None else country
@@ -69,17 +69,43 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
     if country != 'UZ':
         if longitude is None:
             raise ValueError('Both longitude and latitude are required')
+        if not query.strip():
+            raise ValueError('A query is required outside Uzbekistan')
         from better_lavka_mcp.region import RegionalStorefront
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).search(query, limit, longitude, latitude)
     async with client.create_http() as http:
-        location = _location(http, longitude, latitude)
-        return await client.Lavka(http).search(query, limit, tuple(location))
+        location = tuple(_location(http, longitude, latitude))
+        lavka = client.Lavka(http)
+        if not query.strip():
+            # Hearted products first, then what was bought here, most recent first; each kept once.
+            hearted, bought = await asyncio.gather(lavka.favorites(location), lavka.recents(location), return_exceptions=True)
+            if isinstance(hearted, BaseException) and isinstance(bought, BaseException):
+                raise bought
+            hearted = [] if isinstance(hearted, BaseException) else hearted
+            bought = [] if isinstance(bought, BaseException) else bought
+            bought_ids, usual, seen = {p['id'] for p in bought}, [], set()
+            for p in [*({**p, 'favorite': True} for p in hearted), *bought]:
+                if p['id'] not in seen:
+                    seen.add(p['id'])
+                    usual.append({**p, 'price': p['price_uzs'], 'quantity': p['pack'], 'bought_before': p['id'] in bought_ids})
+            return {'usual': True, 'products': usual[:limit]}
+        found, hearted, bought = await asyncio.gather(lavka.search(query, limit, location), lavka.favorites(location),
+                                                      lavka.recents(location), return_exceptions=True)
+        if isinstance(found, BaseException):
+            raise found
+        # An unreadable list just means no marks.
+        favorite_ids = set() if isinstance(hearted, BaseException) else {p['id'] for p in hearted}
+        bought_ids = set() if isinstance(bought, BaseException) else {p['id'] for p in bought}
+        for product in found['products']:
+            product['favorite'] = product.get('id') in favorite_ids
+            product['bought_before'] = product.get('id') in bought_ids
+        return found
 
 
 @tool()
 @uz_only
 async def search_addresses(query: str) -> dict:
-    """Find any address by text, e.g. "Amir Temur 1": street, area and coordinates. Pass the coordinates as longitude, latitude to search or cart tools to shop there."""
+    """Find an address by text ("Amir Temur 1"); returns coordinates usable as longitude, latitude in search and cart tools."""
     async with client.create_http() as http:
         return {"addresses": await client.Lavka(http).suggest(query)}

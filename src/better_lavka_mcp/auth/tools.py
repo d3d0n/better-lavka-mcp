@@ -176,7 +176,7 @@ def register_qr_tools(mcp, session_path, guard=None):
     @mcp.tool(name='login', structured_output=False, annotations=ANNOTATIONS['login'])
     @guard
     async def login_tool(replace_existing_session: bool = False, cancel: bool = False):
-        """Sign in to Lavka with a QR code, one call at a time. Not signed in: returns a QR code to scan in the Yandex app and a short-lived link to open on the phone instead; both are login keys, show them only to the user. Call again to see whether the scan went through; it saves the session once Lavka confirms it. Already signed in: says so; replace_existing_session=true switches accounts and needs the user's approval. cancel=true stops a pending QR login without signing out. Never returns credentials."""
+        """Sign in with a QR code: the first call returns a QR and a phone link (login keys: show only to the user); call again until the scan is confirmed. replace_existing_session=true switches accounts (needs approval); cancel=true stops a pending login."""
         import base64
 
         from mcp.types import ImageContent, TextContent

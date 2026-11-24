@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from better_lavka_mcp import client
 from better_lavka_mcp.aliases import resolve
 from better_lavka_mcp.app import _current_delivery, tool, uz_only
+from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.orders import submit as orders
 
 
@@ -41,15 +42,46 @@ def _order_question(data):
             f"{_delivery_terms(data['position'])}.\n{items}")
 
 
-async def _accept_price_changes(http, saved_address_index):
-    from better_lavka_mcp.client import clean_text
+async def _address_cart(http, saved_address_index, expected_address_id=None):
+    """The cart client for a saved address, or None when the address has no location.
+
+    With expected_address_id, refuses when the list was reordered and that index is now another address."""
     from better_lavka_mcp.tools.cart import _cart_client
     _, entries = await orders.addresses(http)
+    if expected_address_id is not None and not (0 <= saved_address_index < len(entries)
+                                                and entries[saved_address_index].get('addressId') == expected_address_id):
+        raise ValueError('The saved address moved or vanished; call use_address again')
     location = entries[saved_address_index]['address'].get('location') if 0 <= saved_address_index < len(entries) else None
     if not isinstance(location, list):
+        return None
+    return (await _cart_client(http, list(location)))[1]
+
+
+async def _accept_price_changes(http, saved_address_index):
+    from better_lavka_mcp.client import clean_text
+    cart_client = await _address_cart(http, saved_address_index)
+    if cart_client is None:
         return []
-    _, cart_client = await _cart_client(http, list(location))
     return [{**change, 'title': clean_text(change['title'])} for change in await cart_client.accept_price_changes()]
+
+
+async def _apply_promo(http, saved_address_index, code, expected_address_id):
+    """Put the user's promo code on the cart of exactly the address being previewed."""
+    cart_client = await _address_cart(http, saved_address_index, expected_address_id)
+    if cart_client is None:
+        raise ValueError('This address has no location, so a promo code cannot be applied')
+    await cart_client.apply_promocode(code)
+
+
+async def _promo_codes(http, saved_address_index, expected_address_id, applied):
+    """The user's other valid codes, or None when Lavka didn't answer (unknown is not "none")."""
+    try:
+        cart_client = await _address_cart(http, saved_address_index, expected_address_id)
+        offered = await cart_client.promocodes() if cart_client is not None else []
+    except (UpstreamError, ValueError, KeyError, TypeError):
+        return None
+    on_cart = str((applied or {}).get('code') or '').casefold()
+    return [p for p in offered if p['valid'] and p['code'].casefold() != on_cart]
 
 
 # The latest preview of each MCP connection, so the model never sees or copies a token. A connection
@@ -94,13 +126,14 @@ def _take_preview(ctx):
 
 @tool()
 @uz_only
-async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None, ctx: Context | None = None) -> dict:
-    """Show the order before paying: address, items, total UZS and card; submit_order then places exactly this preview within five minutes. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing; puts the card on the Lavka cart as its checkout page does, and if Lavka repriced items since they were added, re-saves them at the new price and lists the changes."""
+async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None, spend_plus_points: bool | None = None, promo_code: str | None = None, ctx: Context | None = None) -> dict:
+    """Show the order before paying: address, items, card, total; submit_order places exactly this preview within 5 minutes. Uses the chosen address and remembered card. spend_plus_points=true pays part with Plus points; promo_code applies one of the user's codes (the preview lists them). Charges nothing."""
     from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
     # A new preview replaces the old one even when it fails or asks for a card: the user is
     # no longer looking at the old terms, so submit_order must not place them.
     _forget_preview(ctx)
+    flow = None if spend_plus_points is None else ('charge' if spend_plus_points else 'gain')
     chosen_card = card_last4
     expected_address_id = None
     async with client.create_http() as http:
@@ -129,16 +162,23 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
                     card_last4 = cards[0]
                 else:
                     return {'preview': False, 'cards': ['**** ' + c for c in cards], 'note': 'Ask which card to use and pass card_last4; it is remembered for next time.'}
+        if promo_code:  # a refused code stops the preview: the user asked for it
+            await _apply_promo(http, saved_address_index, promo_code, expected_address_id)
         try:
-            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id)
+            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id, flow)
         except orders.CartNotReady:
             # Lavka repriced items since they were added: re-save them at the current price, as its site does.
             # The new prices end up in the preview total, which the user approves anyway.
             changes = await _accept_price_changes(http, saved_address_index)
             if not changes:
                 raise
-            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id)
+            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id, flow)
             result['price_changes'] = changes
+        codes = await _promo_codes(http, saved_address_index, expected_address_id, result.get('promo_applied'))
+        if codes is None:
+            result['promo_codes'] = 'unknown'
+        elif codes:
+            result['promo_codes'] = codes
     if chosen_card is not None:
         preferences.update(card_last4=chosen_card)
     _remember_preview(ctx, result.pop('preview_token'))
@@ -148,7 +188,7 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
 @tool()
 @uz_only
 async def submit_order(confirmed_total_uzs: str, explicit_confirmation: bool, ctx: Context | None = None) -> dict:
-    """Charges money: place the order from the latest preview_order on this connection (normally this chat). Pass the exact total from that preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. If the client supports it, the user also confirms in a dialog. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure. Any attempt uses up the preview: call preview_order again before another try."""
+    """Charges money. Places the latest preview_order on this connection (normally this chat). Only after the user agreed: confirmed_total_uzs = the preview's exact total, explicit_confirmation=true. Sent once; returns the payment status (3-D Secure link if needed). Any attempt uses up the preview."""
     token = _take_preview(ctx)
     approve = (lambda data: _ask(ctx, _order_question(data))) if _can_ask(ctx) else None
     async with client.create_http() as http:
@@ -158,7 +198,7 @@ async def submit_order(confirmed_total_uzs: str, explicit_confirmation: bool, ct
 @tool()
 @uz_only
 async def reconcile_order_attempt(checked_order_history: bool, checked_payment: bool, accepts_duplicate_risk: bool, no_request_in_progress: bool, explicit_confirmation: bool) -> dict:
-    """Local state only: record that you checked official order history and payment, that no request is in progress, and that you accept duplicate-order risk, then release the unknown checkout block. Verifies nothing, places no order, and cannot rule out delayed processing."""
+    """Only after a checkout ended with an unknown result: record that order history and payment were checked, nothing is in flight and duplicate risk is accepted, to unblock checkout. Places nothing."""
     return orders.reconcile_checkout(history_checked=checked_order_history, payment_checked=checked_payment,
                                      acknowledge_uncertainty=accepts_duplicate_risk,
                                      no_request_in_progress=no_request_in_progress, explicit_confirmation=explicit_confirmation)
@@ -167,7 +207,7 @@ async def reconcile_order_attempt(checked_order_history: bool, checked_payment: 
 @tool()
 @uz_only
 async def cancel_order(order_id: str, explicit_confirmation: bool, ctx: Context | None = None) -> dict:
-    """Cancels an order: send at most one cancellation request for the exact order_id after explicit_confirmation=true. If the client supports it, the user also confirms in a dialog. A response does not prove cancellation, refund status is unknown, and repeat cancellation attempts are blocked."""
+    """Cancel an order, once, with explicit_confirmation=true after the user agreed. Refund timing is up to the bank."""
     if explicit_confirmation is True and _can_ask(ctx) and not await _ask(ctx, f'Cancel Lavka order {order_id}?'):
         return {'outcome': 'declined'}
     async with client.create_http() as http:

@@ -61,6 +61,43 @@ def _order_view(item, detailed=False):
 
 
 
+def is_service_line(product_id):
+    """Lines Lavka adds by itself, such as bags ("…:st-sa-bag"); they can't be ordered as products."""
+    return isinstance(product_id, str) and ':st-' in product_id
+
+
+def _search_variants(query):
+    """The query, then each word shortened by one and two letters, then each word alone (no shorter than 3)."""
+    seen, variants = set(), []
+    words = query.split()
+    candidates = [query]
+    candidates += [' '.join(w[:-cut] if len(w) - cut >= 3 and w.isalpha() else w for w in words) for cut in (1, 2)]
+    if len(words) > 1:
+        candidates += [w for w in sorted(words, key=len, reverse=True) if len(w) >= 3]
+    for candidate in candidates:
+        if candidate.strip() and candidate not in seen:
+            seen.add(candidate)
+            variants.append(candidate)
+    return variants
+
+
+def discount(item):
+    """{'old_price': …, 'discount_percent': …} when Lavka shows a crossed-out price, else {}."""
+    old, now = item.get('oldPrice'), item.get('currentPrice')
+    try:
+        if old is None or now is None or Decimal(str(old)) <= Decimal(str(now)):
+            return {}
+    except (InvalidOperation, ValueError):
+        return {}
+    percent = None
+    pricing = item.get('discountPricing') if isinstance(item.get('discountPricing'), dict) else {}
+    for category in pricing.get('discountAnalyticsCategories') or []:
+        if isinstance(category, dict) and str(category.get('percentageValue') or '').isdigit():
+            percent = int(category['percentageValue'])
+            break
+    return {'old_price': old, **({'discount_percent': percent} if percent else {})}
+
+
 def stock(item):
     """How much one order can take now: {'orderable': N or None, 'low_stock': bool}.
 
@@ -153,14 +190,60 @@ class Lavka:
             if not (55 <= lon <= 74 and 37 <= lat <= 46):
                 raise ValueError("Coordinates must be within Uzbekistan bounding box")
             body["position"] = {"location": [lon, lat]}
-        raw = await self.call("/api/v1/providers/search/v3/lavka", body)
-        if not isinstance(raw, dict) or not isinstance(raw.get("cacheProducts"), list):
-            raise UpstreamError("Unexpected search response; results unavailable")
-        products = []
-        for item in raw["cacheProducts"][:limit]:
-            if isinstance(item, dict):
-                products.append({"id": item.get("id"), "title": clean_text(item.get("title")), "price": item.get("currentPrice"), "currency": "UZS", "quantity": item.get("amount"), "available": item.get("available"), **stock(item)})
-        return {"products": products, "location_supplied": location is not None, "currency_source": region_source, "note": "Availability and price are location dependent; no delivery coverage is implied."}
+        products, searched = [], None
+        # Lavka's search misses some whole words it finds by their stem (live: "каймак" → nothing, "кайм" → two
+        # каймаки), so an empty result is retried with each word shortened, then each word alone.
+        for text in _search_variants(query):
+            raw = await self.call("/api/v1/providers/search/v3/lavka", {**body, "text": text})
+            if not isinstance(raw, dict) or not isinstance(raw.get("cacheProducts"), list):
+                raise UpstreamError("Unexpected search response; results unavailable")
+            products = [{"id": item.get("id"), "title": clean_text(item.get("title")), "price": item.get("currentPrice"), "currency": "UZS",
+                         "quantity": item.get("amount"), "available": item.get("available"), **stock(item), **discount(item)}
+                        for item in raw["cacheProducts"][:limit] if isinstance(item, dict)]
+            if products:
+                searched = text
+                break
+        result = {"products": products, "location_supplied": location is not None, "currency_source": region_source, "note": "Availability and price are location dependent; no delivery coverage is implied."}
+        if searched and searched != query:
+            result["searched_for"] = searched
+        return result
+
+    async def _site_products(self, path, body, limit):
+        """Products from a site-gateway list endpoint (snake_case items with pricing.price)."""
+        import uuid
+        props = self.props or await self.bootstrap()
+        try:
+            r = await self.http.post(BASE + path, headers={**api_headers(props), 'X-Idempotency-Token': uuid.uuid4().hex}, json=body)
+            data = r.json() if r.status_code == 200 else None
+        except Exception:
+            raise UpstreamError('Product list request failed') from None
+        items = (data.get('items') if 'items' in data else data.get('products')) if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise UpstreamError('Unexpected product list response')
+        found = []
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get('id'), str):
+                continue
+            pricing = item.get('pricing') if isinstance(item.get('pricing'), dict) else {}
+            found.append({'id': item['id'], 'title': clean_text(item.get('title')), 'price_uzs': pricing.get('price'),
+                          'pack': item.get('amount'), 'available': item.get('available'),
+                          **stock({'quantityLimit': item.get('quantity_limit')})})
+        return found[:limit]
+
+    async def recents(self, location, limit=200):
+        """What the user bought here before, most recent first (Lavka's "Вы покупали")."""
+        return await self._site_products('/api/v2/lavka/v1/api/v1/user/recents', {'position': {'location': list(location)}}, limit)
+
+    async def favorites(self, location, limit=200):
+        """Products the user hearted in Lavka ("Избранное")."""
+        return await self._site_products('/api/v2/lavka/v1/api/v1/user/favorites', {'position': {'location': list(location)}}, limit)
+
+    async def replacements(self, product_id, location, limit=3):
+        """Lavka's own replacements for a product (what its "replace" button shows), best first, in stock only."""
+        found = await self._site_products('/api/v2/lavka/v1/api/v1/upsale/cart-item-substitutions',
+                                          {'position': {'location': list(location)}, 'currency_sign': 'сум', 'product': product_id,
+                                           'depot_type': 'regular'}, 50)
+        return [f for f in found if f['available'] is not False][:limit]
 
     async def suggest(self, query):
         if not isinstance(query, str) or not query.strip():
@@ -239,7 +322,7 @@ class Lavka:
                    if isinstance(block, dict) and block.get('title') and block.get('value')}
         return {'id': item['id'], 'title': clean_text(item.get('title')), 'brand': clean_text(item.get('brand')) or None,
                 'price_uzs': item.get('currentPrice'), 'pack': item.get('amount'), 'available': item.get('available'),
-                'max_quantity': _number(item.get('quantityLimit')), **stock(item),
+                'max_quantity': _number(item.get('quantityLimit')), **stock(item), **discount(item),
                 'description': clean_text(item.get('description')) or None,
                 'nutrition_per_100g': per_100g or None,
                 'composition': clean_text(ingredients.get('description')) or None,
@@ -293,7 +376,7 @@ class Lavka:
             for pid in ids:
                 card = cards[pid]
                 products.append({'id': pid, 'title': clean_text(card.get('title')), 'price_uzs': card.get('currentPrice'),
-                                 'pack': card.get('amount'), 'available': card.get('available'), 'subcategory': title, **stock(card)})
+                                 'pack': card.get('amount'), 'available': card.get('available'), 'subcategory': title, **stock(card), **discount(card)})
         return {'subcategories': [{'title': title, 'count': len(ids)} for title, ids in shelves],
                 'products': products[:limit], 'total': len(products)}
 

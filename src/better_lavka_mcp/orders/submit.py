@@ -82,7 +82,7 @@ async def addresses(http):
     return client, data
 
 
-async def snapshot(http, address_index, suffix, expected_address_id=None, prepare=False):
+async def snapshot(http, address_index, suffix, expected_address_id=None, prepare=False, cashback_flow=None):
     client, entries = await addresses(http)
     if type(address_index) is not int or not 0 <= address_index < len(entries) or not isinstance(suffix, str) or not re.fullmatch(r'[0-9]{4}', suffix):
         raise ValueError('Select an exact saved address index and four-digit card suffix')
@@ -109,7 +109,7 @@ async def snapshot(http, address_index, suffix, expected_address_id=None, prepar
         raise ValueError('Card suffix is missing or ambiguous')
     card = cards.select(indexes[0])
     # Only the preview prepares the cart; the check before submit must see it unchanged.
-    cart = await (cart_client.prepare_checkout(card) if prepare else cart_client.retrieve())
+    cart = await (cart_client.prepare_checkout(card, cashback_flow) if prepare else cart_client.retrieve())
     if cart.get('availableForCheckout') is not True or not cart.get('items') or not isinstance(cart.get('totalPriceValue'), str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?', cart['totalPriceValue']):
         raise CartNotReady('Nonempty available cart and exact total required')
     if cart.get('statuses', {}).get('isRover') is not False:
@@ -216,8 +216,8 @@ def reconcile_checkout(*, history_checked, payment_checked, acknowledge_uncertai
     return {'released': True, 'warning': 'User attestation is not proof; delayed processing and duplicate orders remain possible. Obtain a fresh preview and explicit confirmation.'}
 
 
-async def preview(http, address_index, card_suffix, expected_address_id=None):
-    binding, _ = await snapshot(http, address_index, card_suffix, expected_address_id, prepare=True)
+async def preview(http, address_index, card_suffix, expected_address_id=None, cashback_flow=None):
+    binding, _ = await snapshot(http, address_index, card_suffix, expected_address_id, prepare=True, cashback_flow=cashback_flow)
     _check_guard()
     binding = {'data': binding, 'session': _session(http)}
     token = secrets.token_urlsafe(32)
@@ -227,7 +227,16 @@ async def preview(http, address_index, card_suffix, expected_address_id=None):
     cart = binding['cart']
     return {'preview_token':token, 'expires_in_seconds':300, 'address':binding['position'],
             'items':cart['items'], 'total_uzs':cart['totalPriceValue'], 'currency':'UZS',
-            'card':'**** '+card_suffix, 'delivery':'non-rover', 'warning':WARNING}
+            'card':'**** '+card_suffix, 'delivery':'non-rover', 'warning':WARNING, 'plus_points': plus_points(cart),
+            'promo_applied': _promo_on(cart)}
+
+
+def _promo_on(cart):
+    """The promo code on the previewed cart, as the user sees it, or None."""
+    applied = cart.get('promocode') if isinstance(cart.get('promocode'), dict) else {}
+    if not applied.get('code') or applied.get('valid') is not True:
+        return None
+    return {'code': applied.get('promocodeText') or applied['code'], 'discount': applied.get('discountText')}
 
 
 # Cart fields that change on every read without changing the order: per-call ETA stamps, the
@@ -268,10 +277,24 @@ def _site_options(cart):
         if isinstance(amount, str) and amount:
             options[key] = amount
     cashback = cart.get('cashback') if isinstance(cart.get('cashback'), dict) else {}
-    # The site links the Plus wallet so the order earns cashback; it never spends cashback unless the user asks.
-    if cashback.get('flow') == 'gain' and isinstance(cashback.get('walletId'), str) and cashback['walletId']:
-        options['cashback'] = {'walletId': cashback['walletId']}
+    # The site links the Plus wallet: to earn on the order, or, when the user chose to spend points in the
+    # preview, with the amount to pay by points (its code sends cashbackToPay only for 'charge').
+    if isinstance(cashback.get('walletId'), str) and cashback['walletId']:
+        if cashback.get('flow') == 'gain':
+            options['cashback'] = {'walletId': cashback['walletId']}
+        elif cashback.get('flow') == 'charge' and plus_points(cart).get('spending'):
+            options['cashback'] = {'walletId': cashback['walletId'], 'cashbackToPay': str(plus_points(cart)['spending'])}
     return options
+
+
+def plus_points(cart):
+    """{'available': N, 'spending': N or 0, 'earning': N} from the cart, or {} without Plus."""
+    cashback = cart.get('cashback') if isinstance(cart.get('cashback'), dict) else {}
+    if cashback.get('exist') is not True or cashback.get('hasNoPlus') is True:
+        return {}
+    available = cashback.get('availableForPayment') if isinstance(cashback.get('availableForPayment'), int) else 0
+    return {'available': available, 'spending': available if cashback.get('flow') == 'charge' else 0,
+            'earning': cashback.get('amountToGain') if isinstance(cashback.get('amountToGain'), int) else 0}
 
 
 SUBMIT_PATH = '/api/v2/lavka/v1/orders/v2/submit'

@@ -4,6 +4,23 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-24
+
+### Added
+- **Promo codes and coupons:** the preview lists the user's valid codes, and `preview_order(promo_code=…)` puts one on the order (only after checking the saved address is still the one chosen); the applied discount, read from the previewed cart, is shown and already in the total.
+- **Plus points:** the cart and preview say how many points can go towards the order; `preview_order(spend_plus_points=true)` spends them (the total drops), `false` earns them.
+- **Replacements:** a cart line the depot can't fill, and an item `add_to_cart` or `repeat_order` left out as sold out, come with Lavka's own replacements, ready to add by id.
+- **"As usual":** `search_products` with an empty query lists the user's favorites, then what they bought at this address, most recent first; search results mark favorites and products bought before, and `add_to_cart` by name prefers the ones bought before.
+- **Discounts:** search, shelves and product cards show the crossed-out price and percentage ("41 240 сум (was 54 990 сум, −25%)").
+- `list_order_history` shows an order still in progress even when it falls outside the requested page.
+
+### Fixed
+- Search finds words Lavka's own search misses whole but finds by their stem (live: "каймак" returned nothing, "кайм" two каймаки): an empty result is retried with each word shortened, and the answer says which words were used. `add_to_cart` never adds such a result on its own: it asks the user to pick, since "молоко без лактозы" broadened to "молоко" is not what was asked for.
+- `repeat_order` no longer tries to put Lavka's bags back into the cart; orders still show them, since they are billed.
+
+### Changed
+- Tool descriptions are about a fifth shorter (≈10 100 instead of ≈12 700 characters of definitions sent with every request).
+
 ## [0.14.0] — 2026-11-24
 
 ### Changed
@@ -244,7 +261,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...v0.12.1

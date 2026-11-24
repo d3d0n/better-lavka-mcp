@@ -54,13 +54,28 @@ def _stock_note(p):
     return None
 
 
+def _was(p, currency='сум'):
+    """" (was 54 990 сум, −25%)" for a crossed-out price, else ""."""
+    if not p.get('old_price'):
+        return ''
+    return f" (was {money(p['old_price'], currency)}" + (f", −{p['discount_percent']}%" if p.get('discount_percent') else '') + ')'
+
+
 def _product(p, price_key='price_uzs', currency='сум'):
-    parts = [money(p.get(price_key), currency)]
+    parts = [money(p.get(price_key), currency) + _was(p, currency)]
     if p.get('pack'):
         parts.append(str(p['pack']))
     if note := _stock_note(p):
         parts.append(note)
+    if p.get('favorite'):
+        parts.append('favorite')
+    if p.get('bought_before'):
+        parts.append('bought before')
     return f"- {text(p.get('title'))} — {', '.join(parts)} · {ref(p.get('id') or p.get('product_id'))}"
+
+
+def _option(o):
+    return f"{text(o.get('title'))} — {money(o.get('price_uzs'))}" + (f", {text(o['pack'], 20)}" if o.get('pack') else '') + f" · {ref(o['id'])}"
 
 
 def _cart_stock(item):
@@ -87,6 +102,20 @@ def _qty(value):
         return None
 
 
+def _points(p):
+    """Plus points worth telling the user about, or None."""
+    if not p:
+        return None
+    if p.get('spending'):
+        return f"Plus points: {p['spending']:,} go towards this order (already taken off the total).".replace(',', ' ')
+    if p.get('available'):
+        return (f"Plus points: up to {p['available']:,} can go towards this order — preview_order(spend_plus_points=true)."
+                .replace(',', ' ') + (f" Earns {p['earning']:,} otherwise.".replace(',', ' ') if p.get('earning') else ''))
+    if p.get('earning'):
+        return f"Plus points: this order earns {p['earning']:,}.".replace(',', ' ')
+    return None
+
+
 def _cart_lines(cart):
     items = cart.get('items') or []
     if not items:
@@ -98,10 +127,14 @@ def _cart_lines(cart):
         if problem:
             short.append(item)
         lines.append(f"- {text(item['title'])} ×{item['quantity']} — {money(item.get('price_uzs'))} each{note} · {ref(item['id'])}")
+        if item.get('replacements'):
+            lines.append('  Lavka suggests instead: ' + '; '.join(_option(o) for o in item['replacements']))
     total = f"Total **{money(cart.get('total_uzs'))}** incl. delivery {money(cart.get('delivery_uzs'))}"
     if cart.get('eta'):
         total += f" · arrives in {cart['eta']}"
     lines.append(total)
+    if points := _points(cart.get('plus_points')):
+        lines.append(points)
     if cart.get('available_for_checkout'):
         lines.append('Ready to order: preview_order shows address, card and the final total.')
     elif short:
@@ -120,13 +153,17 @@ def _additions(result):
     if result.get('added'):
         lines.append('**Added:** ' + '; '.join(f"{text(a['title'])} +{a['added']} (now {a['in_cart']} in cart)" for a in result['added']))
     for choice in result.get('needs_choice') or []:
-        lines.append(f"**Pick one for \"{text(choice['query'], 60)}\"** ×{choice['quantity']} — not bought before, so nothing was added. "
+        why = (f"Lavka found nothing for these exact words, only for «{text(choice['searched_for'], 60)}», so nothing was added. "
+               if choice.get('searched_for') else 'not bought before, so nothing was added. ')
+        lines.append(f"**Pick one for \"{text(choice['query'], 60)}\"** ×{choice['quantity']} — {why}"
                      'Ask the user which one, then call add_to_cart with its product_id:')
         lines += [_product(o) for o in choice['options']]
     if result.get('not_found'):
         lines.append('**Not found:** ' + ', '.join(text(q, 60) for q in result['not_found']) + ' — try other words or search_products.')
     if result.get('unavailable'):
         lines.append('**Sold out, left out:** ' + ', '.join(text(u) for u in result['unavailable']) + ' — offer the user a replacement.')
+    for offer in result.get('replacements') or []:
+        lines.append(f"Lavka suggests instead of {text(offer['for'])}: " + '; '.join(_option(o) for o in offer['options']) + '.')
     for skip in result.get('skipped') or []:
         lines.append(f"**Skipped:** {text(skip['title'])} — {text(skip['reason'], 120)}.")
     for cap in result.get('limited') or []:
@@ -139,7 +176,14 @@ def _search(r):
     currency = {'RUB': '₽', 'KZT': '₸'}.get((r['products'][0].get('currency') if r['products'] else 'UZS'), 'сум')
     if not r['products']:
         return 'Nothing found. Try other words.' if regional else 'Nothing found. Try other words, or browse with list_categories.'
+    if r.get('usual'):
+        lines = ['What the user usually buys here (favorites first, then most recently bought):']
+        lines += [_product({**p, 'pack': p.get('quantity'), 'bought_before': False}, 'price', currency) for p in r['products']]
+        lines.append('Next: add_to_cart with the product_ids the user wants.')
+        return '\n'.join(lines)
     lines = [f"Found {len(r['products'])}" + (f" in Lavka {r['country']}:" if regional else ':')]
+    if r.get('searched_for'):
+        lines[0] = f"Lavka found nothing for the exact words; results for «{text(r['searched_for'], 60)}»:"
     for p in r['products']:
         lines.append(_product({**p, 'pack': p.get('quantity')}, 'price', currency))
     if regional:
@@ -205,7 +249,7 @@ def _found_addresses(r):
 
 def _product_card(r):
     lines = [f"**{text(r['title'])}**" + (f" ({text(r['brand'], 60)})" if r.get('brand') else ''),
-             f"{money(r.get('price_uzs'))}, {r.get('pack') or ''}" + (f" — {note}" if (note := _stock_note(r)) else '')]
+             f"{money(r.get('price_uzs'))}{_was(r)}, {r.get('pack') or ''}" + (f" — {note}" if (note := _stock_note(r)) else '')]
     n = r.get('nutrition_per_100g') or {}
     if n:
         lines.append('Per 100 g: ' + ', '.join(template.format(n[key]) for key, template in
@@ -256,6 +300,8 @@ def _history(r):
         lines += [f"  - {text(i['name'])} ×{i['quantity']} — {money(i.get('price_uzs'))}" for i in o['items']]
     if r.get('tracking') == 'unknown':
         lines.append("Live status: unknown (Lavka's tracking didn't answer) — get_order shows it for one order.")
+    for t in r.get('active_elsewhere') or []:
+        lines.append(f"Also in progress, not on this page: {ref(t['order_id'])}: {_tracking(t)}{_still_possible(t)}")
     lines.append('Next: repeat_order with an order id puts it back in the cart; get_order shows fees and payment.')
     if r.get('next_older_than'):
         lines.append(f"More: list_order_history(older_than=\"{aliases.short(r['next_older_than'])}\").")
@@ -359,6 +405,17 @@ def _preview(r):
     for item in r['items']:
         lines.append(f"- {text(item.get('title'))} ×{item.get('quantity')} — {money(item.get('price'))}")
     lines.append(f"Total **{money(r['total_uzs'])}**.")
+    if points := _points(r.get('plus_points')):
+        lines.append(points)
+    if r.get('promo_applied'):
+        lines.append(f"Promo code {text(r['promo_applied']['code'], 40)} applied: {text(r['promo_applied']['discount'], 30)} (already in the total).")
+    if r.get('promo_codes') == 'unknown':
+        lines.append("Promo codes: unknown (Lavka didn't answer); the user may have some.")
+    if isinstance(r.get('promo_codes'), list) and r['promo_codes']:
+        lines.append('The user also has: ' + '; '.join(
+            f"«{text(p['title'], 60)}»" + (f" {text(p['subtitle'], 60)}" if p.get('subtitle') else '')
+            + (f" until {str(p['expires'])[:10]}" if p.get('expires') else '') + f" — promo_code=\"{text(p['code'], 40)}\""
+            for p in r['promo_codes']) + '. Ask before using one: preview_order(promo_code=...).')
     lines.append(f"Show this to the user. Only after they say yes, call submit_order(confirmed_total_uzs=\"{r['total_uzs']}\", "
                  'explicit_confirmation=true) within 5 minutes; it places exactly this preview.')
     return '\n'.join(lines)

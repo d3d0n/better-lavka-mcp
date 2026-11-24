@@ -10,6 +10,16 @@ from better_lavka_mcp.orders.cancel import CancellationBlocked
 from better_lavka_mcp.orders.guard import AttemptBlocked
 from better_lavka_mcp.tools import orders as order_tools
 
+REAL_PROMO_CODES = order_tools._promo_codes
+
+
+@pytest.fixture(autouse=True)
+def no_promo_lookup(monkeypatch):
+    """These tests drive checkout over mocked transports; the promo-code lookup has its own tests."""
+    async def nothing(http, saved_address_index, expected_address_id, applied):
+        return []
+    monkeypatch.setattr(order_tools, '_promo_codes', nothing)
+
 
 @pytest.mark.asyncio
 async def test_order_tools_are_exposed():
@@ -489,3 +499,73 @@ async def test_submit_places_only_this_connections_preview(tmp_path, monkeypatch
         assert failed.isError
         stale = await chat_a.call_tool("submit_order", args)
         assert stale.isError and "No order preview on this connection" in stale.content[0].text and len(posts) == 1
+
+
+def test_spending_plus_points_sends_the_amount_and_earning_sends_only_the_wallet():
+    # Live: switching the cart to "charge" took the 17 960 available points off a 75 880 total.
+    base = {"walletId": "w/1", "exist": True, "availableForPayment": 17960, "amountToGain": 0}
+    charge = orders._site_options({"cashback": {**base, "flow": "charge"}})
+    gain = orders._site_options({"cashback": {**base, "flow": "gain"}})
+    assert charge["cashback"] == {"walletId": "w/1", "cashbackToPay": "17960"}
+    assert gain["cashback"] == {"walletId": "w/1"}
+    assert "cashback" not in orders._site_options({"cashback": {**base, "flow": "charge", "availableForPayment": 0}})
+
+
+def test_cart_and_preview_say_what_plus_points_do():
+    from better_lavka_mcp import render
+    offer = render._points(orders.plus_points({"cashback": {"exist": True, "availableForPayment": 17960, "amountToGain": 120}}))
+    assert offer == "Plus points: up to 17 960 can go towards this order — preview_order(spend_plus_points=true). Earns 120 otherwise."
+    spent = render._points(orders.plus_points({"cashback": {"exist": True, "availableForPayment": 17960, "flow": "charge"}}))
+    assert spent == "Plus points: 17 960 go towards this order (already taken off the total)."
+    assert render._points(orders.plus_points({"cashback": {"exist": True, "hasNoPlus": True, "availableForPayment": 5}})) is None
+
+
+@pytest.mark.asyncio
+async def test_promo_codes_lists_the_others_and_promo_writes_check_the_address(monkeypatch):
+    applied, entries = [], [{'addressId': 'a-home', 'address': {'location': [69.2, 41.3]}}]
+    class Cart:
+        async def apply_promocode(self, code):
+            applied.append(code)
+        async def promocodes(self):
+            return [{'title': 'Скидка 10%', 'subtitle': 'на любой заказ', 'code': 'promo10', 'valid': True, 'expires': '2026-12-09T18:59:59+00:00'},
+                    {'title': 'Скидка 11490 сум', 'subtitle': None, 'code': 'coupon11490', 'valid': True, 'expires': '2027-05-26T18:59:59+00:00'},
+                    {'title': 'Old', 'subtitle': None, 'code': 'expired', 'valid': False, 'expires': None}]
+    async def addresses(http):
+        return None, entries
+    async def cart_client(http, location):
+        return None, Cart()
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr('better_lavka_mcp.tools.cart._cart_client', cart_client)
+    await order_tools._apply_promo(None, 0, 'promo10', 'a-home')
+    assert applied == ['promo10']
+    # The list was reordered after use_address: index 0 is now another address, so nothing is written.
+    entries[:] = [{'addressId': 'a-work', 'address': {'location': [69.3, 41.2]}}]
+    with pytest.raises(ValueError, match='moved'):
+        await order_tools._apply_promo(None, 0, 'coupon11490', 'a-home')
+    assert applied == ['promo10']
+    entries[:] = [{'addressId': 'a-home', 'address': {'location': [69.2, 41.3]}}]
+    others = await REAL_PROMO_CODES(None, 0, 'a-home', {'code': 'PROMO10'})
+    assert [p['code'] for p in others] == ['coupon11490']  # applied and invalid ones left out
+    from better_lavka_mcp import render
+    text = render.render('preview_order', {'address': {'street': 'Example street', 'house': '1'}, 'card': '**** 3456', 'items': [],
+                                           'total_uzs': '46760', 'promo_applied': {'code': 'PROMO10', 'discount': '−4 130 сум'},
+                                           'promo_codes': others})
+    assert 'Promo code PROMO10 applied: −4 130 сум (already in the total).' in text
+    assert 'The user also has: «Скидка 11490 сум» until 2027-05-26 — promo_code="coupon11490". Ask before using one' in text
+
+
+def test_preview_reports_the_promo_on_the_previewed_cart():
+    assert orders._promo_on({'promocode': {'code': 'x', 'promocodeText': 'X', 'valid': True, 'discountText': '−1 сум'}}) == {'code': 'X', 'discount': '−1 сум'}
+    assert orders._promo_on({'promocode': {'code': 'x', 'valid': False}}) is None and orders._promo_on({}) is None
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_coupon_list_is_unknown_not_empty(monkeypatch):
+    from better_lavka_mcp import render
+    async def addresses(http):
+        raise orders.UpstreamError('Lavka is down')
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    assert await REAL_PROMO_CODES(None, 0, 'a-home', None) is None
+    preview = {'address': {'street': 'Example street', 'house': '1'}, 'card': '**** 3456', 'items': [], 'total_uzs': '1'}
+    assert "Promo codes: unknown (Lavka didn't answer)" in render.render('preview_order', {**preview, 'promo_codes': 'unknown'})
+    assert 'Promo codes' not in render.render('preview_order', preview)  # none offered: no line

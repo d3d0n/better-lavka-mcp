@@ -57,14 +57,16 @@ class CartClient:
         self.http, self.props, self.location, self.currency_sign = http, props, list(location), currency_sign
 
     # The site's own checkout-page calls; they take snake_case bodies and a one-time X-Idempotency-Token.
-    SITE_WRITES = ('/api/v2/lavka/v1/cart/v1/set-payment', '/api/v2/lavka/v1/cart/v1/set-cashback-flow')
+    SITE_WRITES = ('/api/v2/lavka/v1/cart/v1/set-payment', '/api/v2/lavka/v1/cart/v1/set-cashback-flow',
+                   '/api/v2/lavka/v1/cart/v1/apply-promocode')
+    SITE_READS = ('/api/v2/lavka/v1/cart/v1/promocodes-list',)
 
     async def _post(self, path, body):
-        if path not in ('/api/v1/providers/cart/v1/retrieve', '/api/v1/providers/cart/v1/update', *self.SITE_WRITES):
+        if path not in ('/api/v1/providers/cart/v1/retrieve', '/api/v1/providers/cart/v1/update', *self.SITE_WRITES, *self.SITE_READS):
             raise ValueError('Endpoint is not allowlisted')
         p = self.props
         headers = api_headers(p)
-        if path in self.SITE_WRITES:
+        if path in self.SITE_WRITES or path in self.SITE_READS:
             headers['X-Idempotency-Token'] = uuid.uuid4().hex
         try:
             r = await self.http.post(BASE + path, headers=headers, json=body)
@@ -87,7 +89,7 @@ class CartClient:
             raise UpstreamError('Unexpected cart response')
         return cart
 
-    async def prepare_checkout(self, card):
+    async def prepare_checkout(self, card, cashback_flow=None):
         """Put the card and the cashback mode on the cart, as the site's checkout page does when it opens.
 
         Seen live: a cart without a payment method was charged and then canceled by Lavka, while the
@@ -106,10 +108,38 @@ class CartClient:
                 if (method.get('type'), method.get('id')) != (card.get('type'), card.get('id')):
                     raise UpstreamError('Lavka did not keep the chosen card on the cart')
             cashback = cart.get('cashback') if isinstance(cart.get('cashback'), dict) else {}
-            if cashback.get('exist') is True and not cashback.get('flow'):
-                await self._post(self.SITE_WRITES[1], self._site_body(cart, cashback_flow='gain'))
+            # 'charge' spends Plus points on this order (Lavka lowers the total), 'gain' earns them; with no
+            # request, a mode the user already chose stays and an unset one becomes 'gain', as on the site.
+            wanted = cashback_flow or cashback.get('flow') or 'gain'
+            if cashback.get('exist') is True and cashback.get('flow') != wanted:
+                await self._post(self.SITE_WRITES[1], self._site_body(cart, cashback_flow=wanted))
                 cart = await self.retrieve()
             return cart
+
+    async def apply_promocode(self, code):
+        """Put a promo code on the cart, as the site's checkout does; returns the cart. Lavka keeps one code per cart."""
+        if not isinstance(code, str) or not code.strip() or len(code) > 64:
+            raise ValueError('A promo code is required')
+        async with contextlib.AsyncExitStack() as stack:
+            if not self._held:
+                await stack.enter_async_context(_write_lock())
+            cart = await self.retrieve()
+            try:
+                await self._post(self.SITE_WRITES[2], self._site_body(cart, promocode=code.strip()))
+            except UpstreamError:
+                raise ValueError("Lavka didn't accept that promo code for this cart") from None
+            cart = await self.retrieve()
+            applied = cart.get('promocode') if isinstance(cart.get('promocode'), dict) else {}
+            if str(applied.get('code') or '').casefold() != code.strip().casefold():
+                raise ValueError("Lavka didn't keep that promo code on the cart")
+            return cart
+
+    async def promocodes(self):
+        """The user's promo codes and coupons Lavka offers for this address: [{title, subtitle, code, valid, expires}]."""
+        raw = await self._post(self.SITE_READS[0], {'position': {'location': self.location}})
+        found = raw.get('promocodes') if isinstance(raw.get('promocodes'), list) else []
+        return [{'title': p.get('title'), 'subtitle': p.get('subtitle'), 'code': p.get('promocode'), 'valid': p.get('valid') is True,
+                 'expires': p.get('expire_at')} for p in found if isinstance(p, dict) and isinstance(p.get('promocode'), str)]
 
     def _site_body(self, cart, **fields):
         return {'cart_id': cart['cartId'], 'cart_version': cart['cartVersion'], 'position': {'location': self.location},

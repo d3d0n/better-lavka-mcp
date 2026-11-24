@@ -15,7 +15,7 @@ def _address_summary(entry, index):
 @tool()
 @uz_only
 async def use_address(address: str) -> dict:
-    """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or its number from get_account. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
+    """Choose the delivery address by its saved name ("Дом", "home"), part of the street, or its number in get_account. Remembered; search, cart and ordering then use it."""
     if not isinstance(address, str) or not address.strip():
         raise ValueError('Name the saved address, for example "home"')
     from better_lavka_mcp.auth.qr import cookie_identity
@@ -59,7 +59,7 @@ async def use_address(address: str) -> dict:
 @tool()
 @uz_only
 async def get_account() -> dict:
-    """Read-only: who is signed in, the saved delivery addresses (which one is chosen) and the saved cards (which one is remembered for paying). Choose an address with use_address, a card with preview_order(card_last4=...)."""
+    """Who is signed in, saved addresses (chosen one marked) and saved cards (remembered one marked)."""
     from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
     async with client.create_http() as http:
@@ -83,7 +83,7 @@ async def get_account() -> dict:
 @tool()
 @uz_only
 async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
-    """Orders, newest first: items, total, address and, for orders Lavka still tracks, its live status ("Курьер в пути", minutes left, courier distance; "Заказ отменён — Вернём деньги на карту"). For the next page pass next_older_than as older_than. limit is 1–21."""
+    """Orders, newest first, with items and total; orders still in progress show their live status (minutes left, courier distance). Next page: older_than=next_older_than. limit 1–21."""
     from better_lavka_mcp.orders.tracking import tracked_orders
     async with client.create_http() as http:
         lavka = client.Lavka(http)
@@ -93,16 +93,19 @@ async def list_order_history(limit: int = 21, older_than: str | None = None) -> 
         except UpstreamError:
             history['tracking'] = 'unknown'
             return history
+        on_page = {order['order_id'] for order in history['orders']}
         for order in history['orders']:
             if order['order_id'] in live:
                 order['tracking'] = live[order['order_id']]
+        # An order still on its way must not hide behind the page size (e.g. limit=1 after a newer canceled one).
+        history['active_elsewhere'] = [t for oid, t in live.items() if oid not in on_page and t.get('status') != 'closed']
         return history
 
 
 @tool()
 @uz_only
 async def get_order(order_id: str) -> dict:
-    """One order in full: items, products, delivery, service fee, discount, total, address and status, its payment status (with the 3-D Secure link when the bank asks for one) and what Lavka's tracking screen says (minutes left, courier distance, "Заказ отменён — Вернём деньги на карту")."""
+    """One order in full: items, fees, total, payment status (3-D Secure link if the bank asks) and live status."""
     from better_lavka_mcp.orders.tracking import tracking_state
     from better_lavka_mcp.payment import payment_status
     order_id = resolve(order_id)
