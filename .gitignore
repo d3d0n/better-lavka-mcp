@@ -38,6 +38,7 @@
 !/src/better_lavka_mcp/__main__.py
 !/src/better_lavka_mcp/cart.py
 !/src/better_lavka_mcp/constants.py
+!/src/better_lavka_mcp/headers.py
 !/src/better_lavka_mcp/errors.py
 !/src/better_lavka_mcp/payment.py
 !/src/better_lavka_mcp/aliases.py
@@ -59,7 +60,6 @@
 !/src/better_lavka_mcp/orders/__init__.py
 !/src/better_lavka_mcp/orders/cancel.py
 !/src/better_lavka_mcp/orders/guard.py
-!/src/better_lavka_mcp/orders/observation.py
 !/src/better_lavka_mcp/orders/payload.py
 !/src/better_lavka_mcp/orders/rejection.py
 !/src/better_lavka_mcp/orders/submit.py

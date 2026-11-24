@@ -64,7 +64,7 @@ You sign in once by scanning a QR code in the Yandex app. Everything runs on you
 
 | ✅ Works today | 🚧 Not yet |
 |---|---|
-| Sign in with a QR code from the Yandex app | Live order tracking (courier, ETA) |
+| Sign in with a QR code from the Yandex app | Courier position and live ETA |
 | Your address and card are remembered | Scheduled delivery slots |
 | Product search, catalog by category, product cards with nutrition, shopping lists, cart editing | |
 | Order history with items, repeat an order, order details | |

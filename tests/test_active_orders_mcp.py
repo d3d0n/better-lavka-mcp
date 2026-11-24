@@ -23,7 +23,7 @@ async def test_list_active_orders_reads_authenticated_verified_empty_array(monke
         return httpx.Response(200, json=[])
     monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     result = await account.list_active_orders()
-    assert result['active_order_count'] == 0
+    assert result['orders'] == []
     assert result['history_complete'] is False
     assert result['reconciles_uncertain_submission'] is False
     assert calls[-1][0] == 'GET'
@@ -46,17 +46,16 @@ async def test_list_active_orders_rejects_unauthenticated_or_unverified_shapes(m
 
 
 @pytest.mark.asyncio
-async def test_nonempty_tracking_feed_exposes_only_entry_count(monkeypatch):
+async def test_tracking_feed_entries_are_decoded_without_personal_data(monkeypatch):
     def handle(request):
         if request.url.host == 'yandex.uz':
             return httpx.Response(200, headers={'set-cookie': 'yandexuid=anon; Domain=.yandex.uz; Path=/'})
         if request.url.path == PROPS_PAGE:
             props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
-        return httpx.Response(200, json=[{'id': 'secret'}])
+        return httpx.Response(200, json=[{'id': 'o1', 'status': 'closed', 'resolution': 'canceled', 'contact': {'phone': 'secret'}}])
     monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
     result = await account.list_active_orders()
-    assert result['feed_entry_count'] == 1
-    assert result['active_order_count'] is None
+    assert [(o['order_id'], o['resolution']) for o in result['orders']] == [('o1', 'canceled')]
     assert result['reconciles_uncertain_submission'] is False
     assert 'secret' not in str(result)

@@ -13,6 +13,7 @@ from better_lavka_mcp.cart import CartClient
 from better_lavka_mcp.client import Lavka
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 from better_lavka_mcp.orders.cancel import cancel_order as cancel_once
 from better_lavka_mcp.orders.guard import GUARD, AttemptBlocked, AttemptGuard
 from better_lavka_mcp.orders.payload import build_provider_payload
@@ -89,8 +90,7 @@ async def snapshot(http, address_index, suffix, expected_address_id=None):
     if not isinstance(loc, list) or len(loc) != 2:
         raise ValueError('Saved address has no usable location')
     props = client.props or {}
-    headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-               'X-Csrf-Token': props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+    headers = api_headers(props)
     response = await http.get(BASE + '/api/v1/providers/v2/service-info', headers=headers,
         params={'position[location][0]':loc[0], 'position[location][1]':loc[1], 'fallbackCurrencySign':'сум', 'depotType':'regular'})
     if response.status_code != 200:
@@ -248,6 +248,21 @@ def _changed(old, new, path=''):
     return [] if old == new else [path or 'checkout data']
 
 
+def _site_options(cart):
+    """The optional submit fields the Lavka site sends for this cart (see its checkout page)."""
+    options = {'useRover': False}
+    paid = cart.get('paidServices') if isinstance(cart.get('paidServices'), dict) else {}
+    for key in ('serviceFee', 'serviceFeeV2'):
+        amount = (paid.get(key) or {}).get('amount') if isinstance(paid.get(key), dict) else None
+        if isinstance(amount, str) and amount:
+            options[key] = amount
+    cashback = cart.get('cashback') if isinstance(cart.get('cashback'), dict) else {}
+    # The site links the Plus wallet so the order earns cashback; it never spends cashback unless the user asks.
+    if cashback.get('flow') == 'gain' and isinstance(cashback.get('walletId'), str) and cashback['walletId']:
+        options['cashback'] = {'walletId': cashback['walletId']}
+    return options
+
+
 async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approve=None):
     """Send the one checkout request for a fresh, user-confirmed preview.
 
@@ -289,12 +304,11 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
         if _terms(fresh) != _terms(old):
             raise ValueError('Checkout data changed (' + ', '.join(_changed(_terms(old), _terms(fresh))) + '); obtain and confirm a new preview')
         cart, pos, card = fresh['cart'], fresh['position'], fresh['card']
-        payload = build_provider_payload(cart_id=cart['cartId'], cart_version=cart['cartVersion'], flow_version=cart['orderFlowVersion'], position=pos, depot_type='regular', payment_type=card['type'], payment_id=card['id'], options={'useRover':False})
+        payload = build_provider_payload(cart_id=cart['cartId'], cart_version=cart['cartVersion'], flow_version=cart['orderFlowVersion'], position=pos, depot_type='regular', payment_type=card['type'], payment_id=card['id'], options=_site_options(cart))
     except BaseException:
         _release(nonce, 'Preflight failed before any checkout write')
         raise
-    headers = {'Origin':BASE, 'Referer':BASE+'/', 'X-Requested-With':'XMLHttpRequest',
-               'X-Csrf-Token':props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff':props.get('csrfToken') or ''}
+    headers = api_headers(props)
     # The Lavka site sends the cart's one-time token with every submit, so Lavka itself drops a duplicate.
     if isinstance(cart.get('nextIdempotencyToken'), str) and cart['nextIdempotencyToken']:
         headers['X-Idempotency-Token'] = cart['nextIdempotencyToken']
@@ -311,7 +325,16 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
     if response.status_code == 200 and isinstance(data, dict) and isinstance(data.get('orderId'), str) and data['orderId']:
         _finish(nonce, 'submitted', 'Order ID returned')
         result.update(outcome='submitted', order_id=data['orderId'])
+        # Lavka's own answer, minus ids: which fields it sent and how the site should track payment.
+        result['lavka_response'] = {'fields': sorted(str(k) for k in data)[:30],
+                                    **({'track_payment': data['trackPayment']} if isinstance(data.get('trackPayment'), dict) else {})}
         result.update(await _await_payment(http, props, data['orderId']))
+        if result.get('payment_status') not in PAYMENT_OK:
+            from better_lavka_mcp.orders.tracking import tracking_state
+            try:
+                result['tracking'] = (await tracking_state(http, props, [data['orderId']])).get(data['orderId'])
+            except UpstreamError:
+                result['tracking'] = {'state': 'unknown'}
     elif 400 <= response.status_code <= 599:
         projection = sanitize_rejection(response.status_code, data)
         result.update(projection)
@@ -344,6 +367,8 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
 
 
 PAYMENT_POLL_ATTEMPTS = 6
+# Statuses the Lavka site treats as a finished, good payment.
+PAYMENT_OK = frozenset({'success', 'paid', 'hold', 'need_to_skip'})
 PAYMENT_POLL_INTERVAL = 2.0
 
 

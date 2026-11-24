@@ -5,7 +5,7 @@ Not a verified server contract or a safe checkout gate. Never transmits a reques
 import json
 import math
 
-OPTIONAL_FIELDS = frozenset({"secondaryPaymentMethod", "cashback", "serviceFee",
+OPTIONAL_FIELDS = frozenset({"secondaryPaymentMethod", "cashback", "serviceFee", "serviceFeeV2",
     "timeslot", "useRover", "giftByPhone", "charity", "useNotVerifiedPhone",
     "commentForPicker", "dispatchPassParams"})
 
@@ -62,7 +62,8 @@ def build_provider_payload(*, cart_id, cart_version, flow_version, position,
         options = {**options, "serviceFee": fee}
     result = {"cartId": cart_id, "cartVersion": cart_version, "flowVersion": flow_version,
               "position": position, **payment,
-              "depotOrderContext": {"depotType": depot_type, "position": location}, **options}
+              # The site turns {depotType, position} into {position, isSupermarket} before sending.
+              "depotOrderContext": {"position": location, "isSupermarket": depot_type == "supermarket"}, **options}
     try:
         # JSON round-trip deep-copies and rejects NaN/non-JSON objects.
         return json.loads(json.dumps(result, allow_nan=False, ensure_ascii=False))

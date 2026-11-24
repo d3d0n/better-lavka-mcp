@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 
 
 @dataclass
@@ -29,8 +30,7 @@ class PaymentClient:
 
     async def lookup(self):
         p = self.props
-        headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-                   'X-Csrf-Token': p.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': p.get('csrfToken') or ''}
+        headers = api_headers(p)
         try:
             r = await self.http.post(BASE + '/api/v1/providers/payments/v1/methods', headers=headers,
                                      json={'location': self.location, 'countryIso3': 'UZB'})
@@ -61,15 +61,15 @@ class PaymentClient:
         return PaymentResults(masked, ids)
 
 
-TERMINAL_PAYMENT_STATUSES = frozenset({'success', 'paid', 'hold', 'failed', 'rejected', 'cancel', 'canceled', 'cancelled'})
+# The site stops polling at fail, success, cancel and need_to_skip; the rest are older or alternative spellings.
+TERMINAL_PAYMENT_STATUSES = frozenset({'success', 'need_to_skip', 'paid', 'hold', 'fail', 'failed', 'rejected', 'cancel', 'canceled', 'cancelled'})
 
 
 async def payment_status(http, props, order_id):
     """Read one order's payment status; returns status and a 3-D Secure redirect when the bank asks for one."""
     if not isinstance(order_id, str) or not order_id or len(order_id) > 128:
         raise ValueError('An order id is required')
-    headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-               'X-Csrf-Token': props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+    headers = api_headers(props)
     try:
         r = await http.post(BASE + '/api/v1/providers/payments/v1/status', headers=headers,
                             json={'orderId': order_id, 'paymentType': 'card'})
@@ -86,4 +86,9 @@ async def payment_status(http, props, order_id):
     payload = data.get('payload')
     payload = payload if isinstance(payload, dict) else {}
     redirect = payload.get('redirectUrl') or data.get('redirectUrl')
-    return {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None}
+    result = {'payment_status': data['status'], 'redirect_url': redirect if isinstance(redirect, str) and redirect.startswith('https://') else None}
+    # The site shows this title and text to the user when a card payment fails.
+    if payload.get('type') == 'error':
+        result['payment_error'] = {k: payload[src].strip()[:200] for k, src in (('title', 'errorTitle'), ('text', 'errorSubtitle'))
+                                   if isinstance(payload.get(src), str) and payload[src].strip()}
+    return result

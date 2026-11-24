@@ -32,6 +32,6 @@ A timeout, transport error, or unrecognized response may mean the outcome is **u
 
 `list_order_history` returns past orders newest first with their items (product id, name, quantity, price), total and short address; `limit` is at most 21, and the next page is requested with `older_than` set to the previous page's `next_older_than` (an order id, as the web app does; paging has not yet been exercised on an account with more than one page). `get_order(order_id)` adds products, delivery, service fee and discount. Contact details, receipts and account identifiers are not returned.
 
-`list_active_orders` reads the active tracking feed; nonempty feed entries are counted but not yet decoded, and an empty feed cannot rule out a delayed order.
+`list_active_orders` lists the orders Lavka still tracks, closed ones included, with Lavka's status and the text its tracking screen shows (for example "Заказ отменён — Вернём деньги на карту"); `get_order` adds the same line. An empty feed cannot rule out a delayed order.
 
 `cancel_order(order_id, explicit_confirmation=true)` sends at most one cancellation request and quarantines further cancellation attempts. Confirm the exact order and review applicable terms first. A successful HTTP response, including an empty object, does not prove cancellation; verify the exact order in the official app. Refund status and fees are unknown. The cancellation guard has no release workflow: later cancellations require independent reconciliation and an operator-managed solution, not automatic retry or deletion of state.

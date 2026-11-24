@@ -267,6 +267,35 @@ async def test_fields_lavka_changes_on_every_read_do_not_block_the_order(tmp_pat
         assert len(posts) == 1
 
 
+@pytest.mark.asyncio
+async def test_submit_request_matches_the_lavka_site(tmp_path, monkeypatch):
+    monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
+    monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
+    cart = {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": "10", "items": [{"id": "x"}],
+            "nextIdempotencyToken": "once", "cashback": {"flow": "gain", "walletId": "w/1", "availableForPayment": 17960},
+            "paidServices": {"serviceFeeV2": {"amount": "3990"}, "bagsSample": {"amount": "1950"}}}
+    binding = {"cart": cart, "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
+    async def snap(*args): return binding, {"authProxyCsrfToken": "a", "csrfToken": "b", "pageEnv": {"cityId": 10335, "locale": {"lang": "ru", "region": "UZ"}}}
+    monkeypatch.setattr(orders, "snapshot", snap)
+    sent = []
+    def handle(request):
+        if request.url.path.endswith("payments/v1/status"):
+            return httpx.Response(200, json={"status": "success"})
+        sent.append((request.headers, json.loads(request.content)))
+        return httpx.Response(200, json={"orderId": "one", "trackPayment": {"modalPlace": "none"}})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        http.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
+        p = await orders.preview(http, 0, "1234")
+        result = await orders.submit(http, p["preview_token"], "10", True)
+    headers, body = sent[0]
+    assert headers["X-Idempotency-Token"] == "once" and headers["X-Csrf-Token"] == "a"
+    assert headers["X-Lavka-Web-City"] == "10335" and headers["X-Lavka-Web-Locale"] == "ru-UZ"
+    assert body["depotOrderContext"] == {"position": [69.2, 41.3], "isSupermarket": False}
+    # Earns cashback like the site does, never spends it.
+    assert body["cashback"] == {"walletId": "w/1"} and body["serviceFeeV2"] == "3990" and "serviceFee" not in body
+    assert result["lavka_response"] == {"fields": ["orderId", "trackPayment"], "track_payment": {"modalPlace": "none"}}
+
+
 async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
     """submit_order over a real MCP session whose client answers the confirmation dialog with `answer`."""
     from mcp.shared.memory import create_connected_server_and_client_session

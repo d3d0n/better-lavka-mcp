@@ -11,6 +11,7 @@ import time
 
 from better_lavka_mcp.constants import PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 
 REGIONS = {
     'RU': ('ru', 'RUB'),
@@ -61,10 +62,7 @@ class RegionalStorefront:
             raise ValueError('Valid longitude and latitude required')
         p = self.props or await self.bootstrap()
         info = p['pageData']['serviceInfo']
-        locale = p.get('pageEnv', {}).get('locale', 'ru-RU')
-        if isinstance(locale, dict):
-            locale = f"{locale.get('lang', 'ru')}-{locale.get('region', 'RU')}"
-        headers = {'Origin': self.base, 'Referer': self.base + '/', 'X-Requested-With': 'XMLHttpRequest', 'X-Csrf-Token': p.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': p.get('csrfToken') or '', 'X-Lavka-Web-Locale': locale, 'X-Lavka-Web-City': str(p.get('pageEnv', {}).get('cityId', ''))}
+        headers = api_headers(p, self.base)
         body = {'depotType':'regular', 'currencySign':info['currencySign'], 'text':query, 'productsLimit':limit, 'subcategoriesLimit':0, 'useRetail':True, 'source':'manual_input', 'position':{'location':[longitude, latitude]}}
         r = await self.http.post(self.base + '/api/v1/providers/search/v3/lavka', headers=headers, json=body)
         if r.status_code != 200:

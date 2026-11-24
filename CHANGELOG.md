@@ -4,6 +4,21 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-24
+
+### Added
+- `list_active_orders` and `get_order` show what Lavka's tracking screen says about an order, such as "Заказ отменён — Вернём деньги на карту", with its status and outcome; addresses, phones and couriers are left out.
+- `get_payment_status` passes on the error title and text Lavka gives for a failed card payment.
+- When a submitted order's payment does not succeed, `submit_order` adds Lavka's tracking verdict and a summary of Lavka's answer to the submit.
+
+### Fixed
+- The checkout request now matches the Lavka site's: the same locale and city headers as every other call, `depotOrderContext` as `{position, isSupermarket}`, the service fee fields from the cart, and the Plus wallet for earning cashback (cashback is never spent).
+- An order whose payment ends as `cancel` or `fail` is no longer reported as placed and on the way; the answer says not to submit again without the user.
+- The payment statuses `fail` and `need_to_skip`, which the site treats as final, end the payment check.
+
+### Removed
+- `orders/observation.py`, an unused duplicate of the tracking reader.
+
 ## [0.7.3] — 2026-11-24
 
 ### Fixed
@@ -146,7 +161,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.0...v0.7.1

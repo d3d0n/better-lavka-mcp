@@ -4,6 +4,7 @@ from better_lavka_mcp.aliases import resolve
 from better_lavka_mcp.app import _location, _remember_delivery, account_fingerprint, tool, uz_only
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 from better_lavka_mcp.orders import submit as orders
 
 
@@ -97,9 +98,17 @@ async def list_order_history(limit: int = 21, older_than: str | None = None) -> 
 @tool()
 @uz_only
 async def get_order(order_id: str) -> dict:
-    """One past order in full: items, products, delivery, service fee, discount, total, address and status."""
+    """One past order in full: items, products, delivery, service fee, discount, total, address and status, plus what Lavka's tracking screen says about it (e.g. "Заказ отменён — Вернём деньги на карту")."""
+    from better_lavka_mcp.orders.tracking import tracking_state
+    order_id = resolve(order_id)
     async with client.create_http() as http:
-        return await client.Lavka(http).order(resolve(order_id))
+        lavka = client.Lavka(http)
+        order = await lavka.order(order_id)
+        try:
+            order['tracking'] = (await tracking_state(http, lavka.props, [order_id])).get(order_id)
+        except UpstreamError:
+            order['tracking'] = {'state': 'unknown'}
+        return order
 
 
 @tool()
@@ -115,14 +124,12 @@ async def get_payment_status(order_id: str) -> dict:
 @tool()
 @uz_only
 async def list_active_orders() -> dict:
-    """Read-only: return the active-order tracking feed. An empty feed does not prove there are no orders and cannot reconcile an uncertain submission."""
+    """Read-only: orders Lavka is tracking (recent ones, closed included) with their status and what Lavka tells the user, e.g. "Курьер в пути" or "Заказ отменён — Вернём деньги на карту". An empty feed does not prove there are no orders and cannot reconcile an uncertain submission."""
     async with client.create_http() as http:
         props = await client.Lavka(http).bootstrap()
         if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
             raise UpstreamError('An authenticated Uzbekistan session is required')
-        headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-                   'X-Csrf-Token': props.get('authProxyCsrfToken') or '',
-                   'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+        headers = api_headers(props)
         try:
             response = await http.get(BASE + '/api/v1/providers/orders-tracking/v1/tracked-orders', headers=headers)
             if response.status_code != 200:

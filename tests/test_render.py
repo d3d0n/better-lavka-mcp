@@ -181,9 +181,18 @@ def test_submit_outcomes_say_what_to_do(result, expected):
 
 def test_order_whose_payment_was_canceled_is_not_reported_as_on_the_way():
     # The live response of the first real order: an order id, then payment "cancel".
-    text = render.render('submit_order', {'outcome': 'submitted', 'order_id': 'o1', 'payment_status': 'cancel', 'redirect_url': None})
-    assert 'payment ended as "cancel"' in text and 'get_order' in text and 'Do not submit again' in text
+    text = render.render('submit_order', {'outcome': 'submitted', 'order_id': 'o1', 'payment_status': 'cancel', 'redirect_url': None,
+                                          'tracking': {'status': 'closed', 'resolution': 'canceled', 'title': 'Заказ отменён',
+                                                       'subtitle': 'Вернём деньги на карту'}})
+    assert 'payment ended as "cancel"' in text and 'Do not submit again' in text
+    assert 'Lavka says: “Заказ отменён — Вернём деньги на карту” (closed/canceled).' in text
     assert 'Order placed' not in text and 'on the way' not in text
+
+
+def test_card_payment_error_text_from_lavka_is_shown():
+    text = render.render('get_payment_status', {'payment_status': 'fail', 'redirect_url': None,
+                                                'payment_error': {'title': 'Оплата не прошла', 'text': 'Недостаточно средств'}})
+    assert 'payment failed' in text and '“Оплата не прошла — Недостаточно средств”' in text
 
 
 def test_order_total_does_not_subtract_the_discount_twice():
@@ -192,12 +201,6 @@ def test_order_total_does_not_subtract_the_discount_twice():
                                        'items': [], 'products_uzs': '189110', 'delivery_uzs': '10', 'service_fee_uzs': '3990',
                                        'discount_uzs': '21600', 'total_uzs': '193110'})
     assert 'Products 189 110 сум + delivery 10 сум + service fee 3 990 сум = **193 110 сум** (discount of 21 600 сум already included)' in text
-
-
-def test_tracking_feed_counts_entries_not_orders():
-    assert 'feed is empty' in render.render('list_active_orders', {'active_order_count': 0, 'history_complete': False})
-    text = render.render('list_active_orders', {'active_order_count': None, 'feed_entry_count': 2})
-    assert '2 entries' in text and 'order' not in text.split(';')[0]
 
 
 def test_product_card_shows_ingredients_and_limit_when_only_in_composition():

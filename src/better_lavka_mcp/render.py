@@ -220,6 +220,8 @@ def _order(r):
     lines += [f"- {text(i['name'])} ×{i['quantity']} — {money(i.get('price_uzs'))} · {ref(i['product_id'])}" for i in r['items']]
     lines.append(f"Products {money(r.get('products_uzs'))} + delivery {money(r.get('delivery_uzs'))} + service fee {money(r.get('service_fee_uzs'))}"
                  f" = **{money(r.get('total_uzs'))}** (discount of {money(r.get('discount_uzs'))} already included).")
+    if 'tracking' in r:
+        lines.append(_tracking(r['tracking']))
     lines.append('Next: repeat_order with this id to order it again.')
     return '\n'.join(lines)
 
@@ -228,10 +230,26 @@ def _payment(r):
     status = r.get('payment_status')
     if r.get('redirect_url'):
         return f"Payment waits for 3-D Secure. Give the user this link to confirm: {r['redirect_url']}"
-    meaning = {'success': 'paid', 'paid': 'paid', 'hold': 'money is held on the card; it is charged when the order is delivered',
-               'failed': 'payment failed', 'rejected': 'payment rejected',
+    meaning = {'success': 'paid', 'paid': 'paid', 'need_to_skip': 'accepted, no card step needed',
+               'hold': 'money is held on the card; it is charged when the order is delivered',
+               'fail': 'payment failed', 'failed': 'payment failed', 'rejected': 'payment rejected',
                'cancel': 'payment canceled', 'canceled': 'payment canceled', 'cancelled': 'payment canceled'}
-    return f"Payment status: {status} — {meaning.get(status, 'still processing; check again in a minute')}."
+    line = f"Payment status: {status} — {meaning.get(status, 'still processing; check again in a minute')}."
+    error = r.get('payment_error') or {}
+    if error:
+        line += ' Lavka says: ' + quoted(' — '.join(v for v in (error.get('title'), error.get('text')) if v), 300)
+    return line
+
+
+def _tracking(t):
+    """What Lavka's tracking screen tells the user, in its words."""
+    if not t:
+        return 'Lavka no longer tracks this order.'
+    if t.get('state') == 'unknown':
+        return "Tracking: unknown (Lavka didn't answer)."
+    said = ' — '.join(x for x in (t.get('title'), t.get('subtitle')) if x)
+    outcome = '/'.join(x for x in (t.get('status'), t.get('resolution')) if x)
+    return f"Lavka says: {quoted(said, 300) or '(no text)'}" + (f" ({text(outcome, 40)})" if outcome else '') + '.'
 
 
 def _delivery_terms(a):
@@ -268,12 +286,16 @@ def _submit(r):
     if outcome == 'declined':
         return 'The user said no in the confirmation dialog. Nothing was sent or charged; the preview is still valid if they change their mind.'
     if outcome == 'submitted':
-        if r.get('payment_status') in ('cancel', 'canceled', 'cancelled', 'failed', 'rejected'):
-            # Seen live: the order is created, the payment ends as "cancel" and Lavka cancels the order. No reason is given.
-            return (f"**Order {ref(r['order_id'])} was created, but its payment ended as \"{text(r['payment_status'], 20)}\".** "
-                    'Lavka usually cancels such an order. The reason and whether the bank held any money are unknown. '
-                    'Next: get_order to see its status, and ask the user to check their bank app. '
-                    'Do not submit again on your own: ask the user first, and they may want another card.')
+        if r.get('payment_status') in ('cancel', 'canceled', 'cancelled', 'fail', 'failed', 'rejected'):
+            # Seen live: the order is created, the payment ends as "cancel" and Lavka cancels the order.
+            lines = [f"**Order {ref(r['order_id'])} was created, but its payment ended as \"{text(r['payment_status'], 20)}\".**"]
+            if r.get('payment_error'):
+                lines.append(_payment(r))
+            if 'tracking' in r:
+                lines.append(_tracking(r['tracking']))
+            lines.append('If the card was charged, Lavka returns the money when it cancels the order; the user can check their bank app. '
+                         'Do not submit again on your own: ask the user first, and they may want another card.')
+            return '\n'.join(lines)
         lines = [f"**Order placed** · {ref(r['order_id'])}."]
         lines.append(_payment(r))
         lines.append('Next: list_active_orders while it is on the way; cancel_order if the user changes their mind.')
@@ -291,10 +313,12 @@ def _submit(r):
 
 
 def _active(r):
-    if r.get('active_order_count') == 0:
-        return 'The tracking feed is empty. A just-placed order can take a moment to show up; list_order_history has the full list.'
-    return (f"The tracking feed has {r.get('feed_entry_count')} entr{'y' if r.get('feed_entry_count') == 1 else 'ies'}; "
-            'their status is not decoded yet, so check the Lavka app for the courier.')
+    if not r.get('orders'):
+        return 'Lavka is tracking no orders. A just-placed order can take a moment to show up; list_order_history has the full list.'
+    lines = ['Orders Lavka is tracking:']
+    for o in r['orders']:
+        lines.append(f"- {ref(o['order_id'])}: {_tracking(o)}" + (' Can still be canceled.' if o.get('cancelable') else ''))
+    return '\n'.join(lines)
 
 
 def _status(r):

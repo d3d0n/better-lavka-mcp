@@ -7,14 +7,15 @@ def payload_args():
                 payment_type="card", payment_id="FAKE_CARD", depot_type="regular")
 
 
-def test_legacy_provider_payload_matches_intercepted_frontend():
+def test_legacy_provider_payload_matches_the_site_submit_body():
+    # The site maps depotOrderContext {depotType, position} to {position, isSupermarket} before sending.
     from better_lavka_mcp.orders.payload import build_provider_payload
     actual = build_provider_payload(**payload_args())
     assert actual == {
         "cartId": "FAKE_CART", "cartVersion": 7, "flowVersion": "grocery_flow_v1",
         "position": {"location": [69.1, 41.3], "placeId": "FAKE", "flat": "1"},
         "paymentMethodType": "card", "paymentMethodId": "FAKE_CARD",
-        "depotOrderContext": {"depotType": "regular", "position": [69.1, 41.3]},
+        "depotOrderContext": {"position": [69.1, 41.3], "isSupermarket": False},
     }
 
 

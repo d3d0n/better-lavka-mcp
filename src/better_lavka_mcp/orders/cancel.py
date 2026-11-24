@@ -6,6 +6,7 @@ import sqlite3
 
 from better_lavka_mcp import paths
 from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.headers import api_headers
 
 
 class CancellationBlocked(RuntimeError):
@@ -49,8 +50,7 @@ async def cancel_order(*, http, props, order_id, confirmed, state_path, history)
         if await _canceled_in_history(history, order_id):
             return {'cancellation_verified': True, 'history_match': True, 'outcome': 'canceled', 'refund_status': 'unknown'}
         raise CancellationBlocked('Cancellation already attempted; inspect official history, do not retry')
-    headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-               'X-Csrf-Token': props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+    headers = api_headers(props)
     try:
         response = await http.post(BASE + '/api/v1/providers/orders/v1/cancel', headers=headers, json={'orderId': order_id})
     except Exception:

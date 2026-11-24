@@ -13,6 +13,7 @@ from better_lavka_mcp import paths
 from better_lavka_mcp.auth import qr as qr_auth
 from better_lavka_mcp.constants import BASE, PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 from better_lavka_mcp.paths import session_file
 
 STATE = session_file()
@@ -86,11 +87,7 @@ class Lavka:
         if path not in ("/api/v1/providers/search/v3/lavka", "/api/v1/providers/address/v1/suggest-search", "/api/v1/providers/address/v1/get-favorite-addresses", "/api/v1/providers/order-log/v1/retrieve", "/api/v1/providers/v1/product", "/api/v1/providers/v1/layout", "/api/v1/providers/v2/category"):
             raise ValueError("Endpoint is not allowlisted")
         p = self.props or await self.bootstrap()
-        locale = p.get("pageEnv", {}).get("locale", "ru-RU")
-        if isinstance(locale, dict):
-            locale = f"{locale.get('lang', 'ru')}-{locale.get('region', 'RU')}"
-        headers = {"Origin": BASE, "Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Csrf-Token": p.get("authProxyCsrfToken") or "", "X-Csrf-Token-Bff": p.get("csrfToken") or "", "X-Lavka-Web-Locale": locale, "X-Lavka-Web-City": str(p.get("pageEnv", {}).get("cityId", ""))}
-        r = await self.http.post(BASE + path, headers=headers, json=body)
+        r = await self.http.post(BASE + path, headers=api_headers(p), json=body)
         if r.status_code in (401, 403):
             raise UpstreamError(f"Upstream HTTP {r.status_code}: authorization or CSRF rejected; session/API bootstrap is not verified")
         if r.status_code != 200:

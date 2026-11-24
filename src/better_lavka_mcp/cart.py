@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 from better_lavka_mcp.constants import BASE
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import api_headers
 
 # Lavka rejects an empty line price but reprices every line to the current
 # catalog price (verified live on lavka.yandex.uz for new and existing items).
@@ -40,8 +41,7 @@ class CartClient:
         if path not in ('/api/v1/providers/cart/v1/retrieve', '/api/v1/providers/cart/v1/update'):
             raise ValueError('Endpoint is not allowlisted')
         p = self.props
-        headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-                   'X-Csrf-Token': p.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff': p.get('csrfToken') or ''}
+        headers = api_headers(p)
         try:
             r = await self.http.post(BASE + path, headers=headers, json=body)
         except Exception:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from better_lavka_mcp import paths
 from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.headers import api_headers
 from better_lavka_mcp.orders.rejection import sanitize_rejection
 
 # Preserve the existing shared quarantine; never silently switch guard databases.
@@ -124,9 +125,7 @@ async def submit_once(http, props, payload, *, guard, response_path=None):
         fd = os.open(response_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
         guard.reserve()  # Commit before even attempting the network write.
-        headers = {'Origin': BASE, 'Referer': BASE + '/', 'X-Requested-With': 'XMLHttpRequest',
-                   'X-Csrf-Token': props.get('authProxyCsrfToken') or '',
-                   'X-Csrf-Token-Bff': props.get('csrfToken') or ''}
+        headers = api_headers(props)
         try:
             response = await http.post(BASE + '/api/v1/providers/orders/v2/submit', headers=headers, json=payload)
         except Exception:
