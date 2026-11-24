@@ -52,14 +52,16 @@ async def _accept_price_changes(http, saved_address_index):
     return [{**change, 'title': clean_text(change['title'])} for change in await cart_client.accept_price_changes()]
 
 
-# The latest preview of each MCP session (one conversation). The model never sees or copies it:
-# submit_order places what this conversation previewed last, never another chat's preview.
+# The latest preview of each MCP connection, so the model never sees or copies a token. A connection
+# is usually one chat, but a host may run one connection for several chats: there, submit_order places
+# the latest preview made in any of them. The confirmed total, the pre-submit check of cart, address
+# and card, and the client's confirmation dialog (when offered) still guard what is placed.
 _PREVIEWS = weakref.WeakKeyDictionary()
 _NO_SESSION = object()  # direct calls without an MCP request (tests, scripts)
 _DIRECT_PREVIEW = {}
 
 
-def _conversation(ctx):
+def _connection(ctx):
     try:
         return ctx.session if ctx is not None else _NO_SESSION
     except (AttributeError, ValueError):  # no active request
@@ -67,7 +69,7 @@ def _conversation(ctx):
 
 
 def _remember_preview(ctx, token):
-    key = _conversation(ctx)
+    key = _connection(ctx)
     if key is _NO_SESSION:
         _DIRECT_PREVIEW['token'] = token
     else:
@@ -75,7 +77,7 @@ def _remember_preview(ctx, token):
 
 
 def _forget_preview(ctx):
-    key = _conversation(ctx)
+    key = _connection(ctx)
     if key is _NO_SESSION:
         _DIRECT_PREVIEW.pop('token', None)
     else:
@@ -83,10 +85,10 @@ def _forget_preview(ctx):
 
 
 def _take_preview(ctx):
-    key = _conversation(ctx)
+    key = _connection(ctx)
     token = _DIRECT_PREVIEW.pop('token', None) if key is _NO_SESSION else _PREVIEWS.pop(key, None)
     if token is None:
-        raise ValueError('No order preview in this conversation: call preview_order, show it to the user, then submit_order')
+        raise ValueError('No order preview on this connection: call preview_order, show it to the user, then submit_order')
     return token
 
 
@@ -146,7 +148,7 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
 @tool()
 @uz_only
 async def submit_order(confirmed_total_uzs: str, explicit_confirmation: bool, ctx: Context | None = None) -> dict:
-    """Charges money: place the order this conversation's preview_order showed. Pass the exact total from that preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. If the client supports it, the user also confirms in a dialog. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure. Any attempt uses up the preview: call preview_order again before another try."""
+    """Charges money: place the order from the latest preview_order on this connection (normally this chat). Pass the exact total from that preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. If the client supports it, the user also confirms in a dialog. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure. Any attempt uses up the preview: call preview_order again before another try."""
     token = _take_preview(ctx)
     approve = (lambda data: _ask(ctx, _order_question(data))) if _can_ask(ctx) else None
     async with client.create_http() as http:

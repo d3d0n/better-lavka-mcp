@@ -4,6 +4,12 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-11-24
+
+### Fixed
+- Docs and messages describe the preview handle's real scope: the latest preview of one MCP connection, which is one chat in most hosts but can be shared by several chats in a host that runs a single connection for all of them. 0.10.0 said "conversation".
+- The submit body sends an empty `building_name` like the site does, the one value that differed from the site's own request for the same cart.
+
 ## [0.11.0] — 2026-11-24
 
 ### Added
@@ -212,7 +218,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...v0.10.1

@@ -346,7 +346,7 @@ async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
         return answer
     async with create_connected_server_and_client_session(app.mcp, elicitation_callback=dialog if ask else None) as mcp_client:
         preview = await mcp_client.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "1234"})
-        # The model only ever sees the total; the preview itself stays with this conversation's session.
+        # The model only ever sees the total; the preview itself stays with this MCP connection.
         assert 'submit_order(confirmed_total_uzs="87630", explicit_confirmation=true)' in preview.content[0].text
         assert "token" not in preview.content[0].text.lower()
         result = await mcp_client.call_tool("submit_order", {"confirmed_total_uzs": "87630", "explicit_confirmation": True})
@@ -450,8 +450,8 @@ async def test_unclassified_http_failure_stays_unknown(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_submit_places_only_this_conversations_preview(tmp_path, monkeypatch):
-    """Two chats are two MCP sessions: one chat's preview can never be placed from another."""
+async def test_submit_places_only_this_connections_preview(tmp_path, monkeypatch):
+    """Two MCP connections never place each other's preview."""
     from mcp.shared.memory import create_connected_server_and_client_session
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
@@ -475,7 +475,7 @@ async def test_submit_places_only_this_conversations_preview(tmp_path, monkeypat
         await chat_a.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "1234"})
         async with create_connected_server_and_client_session(app.mcp) as chat_b:
             other = await chat_b.call_tool("submit_order", args)
-            assert other.isError and "No order preview in this conversation" in other.content[0].text and posts == []
+            assert other.isError and "No order preview on this connection" in other.content[0].text and posts == []
         placed = await chat_a.call_tool("submit_order", args)
         assert "Order placed" in placed.content[0].text and len(posts) == 1
         again = await chat_a.call_tool("submit_order", args)  # the preview is used up
@@ -488,4 +488,4 @@ async def test_submit_places_only_this_conversations_preview(tmp_path, monkeypat
         failed = await chat_a.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "9999"})
         assert failed.isError
         stale = await chat_a.call_tool("submit_order", args)
-        assert stale.isError and "No order preview in this conversation" in stale.content[0].text and len(posts) == 1
+        assert stale.isError and "No order preview on this connection" in stale.content[0].text and len(posts) == 1

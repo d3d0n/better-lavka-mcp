@@ -118,6 +118,7 @@ async def snapshot(http, address_index, suffix, expected_address_id=None, prepar
         raise ValueError('Scheduled delivery is not supported')
     position = {k: address[k] for k in POSITION_FIELDS if k in address and address[k] is not None}
     position['depotId'] = info['depotId']
+    position.setdefault('buildingName', '')  # the site always sends it, empty when the address has none
     if not all(position.get(k) for k in ('placeId','country','city','street','house')):
         raise ValueError('Saved address is incomplete')
     # Bind all raw item fields, fees and delivery metadata, not only displayed fields.
