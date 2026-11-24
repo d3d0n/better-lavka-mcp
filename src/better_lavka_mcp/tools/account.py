@@ -79,8 +79,8 @@ async def list_saved_addresses() -> dict:
 async def list_saved_cards(longitude: float | None = None, latitude: float | None = None) -> dict:
     """Your saved cards as "**** 1234", for the address chosen with use_address (or at longitude, latitude)."""
     from better_lavka_mcp.payment import PaymentClient
-    location = _location(longitude, latitude)
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         props = await client.Lavka(http).bootstrap()
         cards = await PaymentClient(http, props, location).lookup()
         return {'cards': cards.masked_cards}

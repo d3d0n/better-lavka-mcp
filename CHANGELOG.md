@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.6.4] — 2026-11-24
+
+### Fixed
+- The remembered address is checked against the cookies of the request that uses it, not a separate read of the session file, so a login landing in between can no longer send the previous account's coordinates with the new account's cookies.
+
 ## [0.6.3] — 2026-11-24
 
 ### Fixed
@@ -120,7 +125,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.0...v0.6.1

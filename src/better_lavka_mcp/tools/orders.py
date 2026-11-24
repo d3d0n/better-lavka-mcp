@@ -51,7 +51,7 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
         if saved_address_index is None or card_last4 is None:
             _, entries = await orders.addresses(http)
             if saved_address_index is None:
-                delivery = _current_delivery()
+                delivery = _current_delivery(http)
                 if delivery is None:
                     raise ValueError('Choose the delivery address first with use_address, or pass saved_address_index')
                 ids = [i for i, entry in enumerate(entries) if entry.get('addressId') == delivery['address_id']]

@@ -119,13 +119,13 @@ def _account_of(delivery):
     return tuple(tuple(item) for item in account) if isinstance(account, list) and account else None
 
 
-def _current_delivery():
-    """The chosen address, only while the saved session is still the account that chose it.
+def _current_delivery(http):
+    """The chosen address, only while `http` — the client about to use it — is the account that chose it.
 
     Another server process may have signed in to a different account meanwhile, or a slow
     use_address may have finished after that login: both leave an address of the old account."""
     global _delivery
-    from better_lavka_mcp.auth.qr import same_account, session_identity
+    from better_lavka_mcp.auth.qr import cookie_identity, same_account
     if _delivery is None:
         from better_lavka_mcp import preferences
         saved = preferences.load().get('address')
@@ -133,7 +133,8 @@ def _current_delivery():
             _delivery = saved
     if _delivery is not None:
         # Unknown on either side (no session yet, an address saved by an older version) proves nothing: keep it.
-        chosen_by, signed_in = _account_of(_delivery), account_fingerprint(session_identity(client.STATE))
+        # The request's own cookies, not a separate read of the session file: no window for a login in between.
+        chosen_by, signed_in = _account_of(_delivery), account_fingerprint(cookie_identity(http.cookies.jar))
         if chosen_by and isinstance(signed_in, tuple) and not same_account(chosen_by, signed_in):
             _delivery = None
     return _delivery
@@ -154,10 +155,10 @@ def _forget_account_choices():
     preferences.update(address=None, card_last4=None)
 
 
-def _location(longitude=None, latitude=None):
-    """Explicit coordinates win; otherwise use the address chosen with use_address."""
+def _location(http, longitude=None, latitude=None):
+    """Explicit coordinates win; otherwise use the address chosen with use_address, if `http` is its account."""
     if longitude is None and latitude is None:
-        delivery = _current_delivery()
+        delivery = _current_delivery(http)
         if delivery is None:
             raise ValueError('No delivery address yet: call use_address (for example use_address("home")) or pass longitude and latitude')
         return list(delivery['location'])

@@ -36,8 +36,8 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
         from better_lavka_mcp.region import RegionalStorefront
         async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).search(query, limit, longitude, latitude)
-    location = _location(longitude, latitude)
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         return await client.Lavka(http).search(query, limit, tuple(location))
 
 

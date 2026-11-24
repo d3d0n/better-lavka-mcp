@@ -106,8 +106,8 @@ async def _add_and_correct(cart_client, wanted, titles):
 @uz_only
 async def get_cart(longitude: float | None = None, latitude: float | None = None) -> dict:
     """What's in the cart: items, quantities, prices, delivery cost, ETA and total in UZS, for the address chosen with use_address (or at longitude, latitude)."""
-    location = _location(longitude, latitude)
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         _, cart_client = await _cart_client(http, location)
         return _cart_view(await cart_client.retrieve())
 
@@ -116,8 +116,8 @@ async def get_cart(longitude: float | None = None, latitude: float | None = None
 @uz_only
 async def set_cart_quantity(product_id: str, quantity: int, longitude: float | None = None, latitude: float | None = None) -> dict:
     """Change the cart: set product_id to an exact quantity (0 removes it). Lavka applies its current price. Returns the updated cart."""
-    location = _location(longitude, latitude)
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         _, cart_client = await _cart_client(http, location)
         return _cart_view(await cart_client.set_items({resolve(product_id): quantity}))
 
@@ -134,9 +134,9 @@ async def add_to_cart(items: list[CartRequest], longitude: float | None = None, 
     """Add several products in one go. Each item is {"query": "молоко 2.5%"} or {"product_id": "..."} with an optional "quantity" (default 1). A query adds what you ordered before, or the only match; otherwise nothing is added for it and needs_choice lists up to 5 options to pick from — ask the user, then call again with the product_id. Reports what was added, needs a choice, not found, unavailable or capped at the store limit."""
     if not isinstance(items, list) or not items or len(items) > 50:
         raise ValueError('Pass 1–50 items')
-    location = _location(longitude, latitude)
     wanted, titles, not_found, needs_choice = {}, {}, [], []
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         lavka, cart_client = await _cart_client(http, location)
         bought = None
         for request in items:
@@ -183,8 +183,8 @@ async def _bought_before(lavka):
 @uz_only
 async def repeat_order(order_id: str = 'last', longitude: float | None = None, latitude: float | None = None) -> dict:
     """Put everything from a past order back into the cart (order_id from list_order_history, or "last"). Lavka applies today's prices; items the store no longer has are left out and listed."""
-    location = _location(longitude, latitude)
     async with client.create_http() as http:
+        location = _location(http, longitude, latitude)
         lavka, cart_client = await _cart_client(http, location)
         if order_id == 'last':
             history = await lavka.order_history(1)

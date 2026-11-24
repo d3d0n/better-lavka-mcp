@@ -41,7 +41,7 @@ wheels = [
 
 [[package]]
 name = "better-lavka-mcp"
-version = "0.6.3"
+version = "0.6.4"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
