@@ -4,6 +4,8 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-24
+
 ### Added
 - Product cards show ingredients from the ingredients block and the per-order limit.
 - Logo, issue forms, this changelog, and GitHub Releases created from it on every tag.
@@ -76,7 +78,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.5.0...v0.5.1
