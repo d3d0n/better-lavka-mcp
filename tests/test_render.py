@@ -42,6 +42,40 @@ async def test_add_to_cart_text_names_choices_ids_and_next_step(lavka):
     assert 'Йогурт клубничный +1 (now 3 in cart)' in text
 
 
+@pytest.mark.asyncio
+async def test_status_overview_shows_address_cart_and_latest_order(lavka):
+    await text_of('add_to_cart', {'items': [{'query': 'каймак'}]})
+    text = await text_of('get_storefront_status', {})
+    assert 'Signed in.' in text and 'Delivering to **Дом**: Example street, 1.' in text
+    assert 'Cart: 1 item, 21 990 сум — ready to order (preview_order).' in text
+    order = aliases.short('order-1')
+    # Lavka's status word as is, called the latest known one: not "active", not "on the way".
+    assert f'Latest order: 2026-01-01 09:00 — «closed», 99 000 сум · `{order}`.' in text
+    assert 'active' not in text and 'on the way' not in text
+
+
+@pytest.mark.asyncio
+async def test_status_overview_says_unknown_instead_of_dropping_a_failed_read(lavka, monkeypatch):
+    def handle(request):
+        if request.url.path.endswith(('/cart/v1/retrieve', '/order-log/v1/retrieve')):
+            return httpx.Response(502)
+        return lavka.handle(request)
+    monkeypatch.setattr(client, 'create_http', lambda: httpx.AsyncClient(transport=httpx.MockTransport(handle)))
+    text = await text_of('get_storefront_status', {})
+    assert "Cart: unknown (Lavka didn't answer) — get_cart to check." in text
+    assert "Latest order: unknown (Lavka didn't answer) — list_order_history to check." in text
+    assert 'Cart: empty' not in text and 'No orders yet' not in text
+
+
+@pytest.mark.asyncio
+async def test_status_overview_without_address_or_orders(lavka, monkeypatch):
+    monkeypatch.setattr(app, '_delivery', None)
+    lavka.orders = []
+    text = await text_of('get_storefront_status', {})
+    assert 'No delivery address chosen yet: use_address.' in text
+    assert 'Cart: choose an address first (use_address).' in text and 'No orders yet.' in text
+
+
 def test_short_ids_are_three_known_words_stable_and_collision_free(monkeypatch):
     first = aliases.short('7acc5006e3dd4636bb613646099df8a5000400020001')
     assert len(first.split()) == 3 and all(w in aliases.WORDS for w in first.split())

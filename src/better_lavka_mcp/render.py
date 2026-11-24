@@ -300,7 +300,41 @@ def _status(r):
     lines = [f"{name}: {store}; delivery {text(r.get('advertised_delivery_time'), 40) or 'time unknown'}."]
     if r.get('passport_status') is not None:
         lines.append('Signed in.' if r['passport_status'] == 'VALID' else 'Not signed in: call start_login.')
+    if 'delivery_address' in r:
+        a = r['delivery_address']
+        lines.append(f"Delivering to **{text(a.get('label'), 60) or 'saved address'}**: {text(a.get('short_address'))}." if a
+                     else 'No delivery address chosen yet: use_address.')
+    if 'cart' in r:
+        lines.append(_cart_summary(r['cart']))
+    if 'latest_order' in r:
+        lines.append(_latest_order(r['latest_order']))
     return '\n'.join(lines)
+
+
+def _cart_summary(c):
+    state = c.get('state')
+    if state == 'no_address':
+        return 'Cart: choose an address first (use_address).'
+    if state != 'known':
+        return "Cart: unknown (Lavka didn't answer) — get_cart to check."
+    if not c.get('item_count'):
+        return 'Cart: empty.'
+    line = f"Cart: {c['item_count']} item{'s' if c['item_count'] != 1 else ''}, {money(c.get('total_uzs'))}"
+    if c.get('available_for_checkout'):
+        return line + ' — ready to order (preview_order).'
+    return line + f" — can't order yet ({text(c.get('checkout_unavailable_reason'), 60) or 'unknown reason'}); get_cart shows why."
+
+
+def _latest_order(o):
+    state = o.get('state')
+    if state == 'none':
+        return 'No orders yet.'
+    if state != 'known':
+        return "Latest order: unknown (Lavka didn't answer) — list_order_history to check."
+    # Lavka's own status word, as is: the latest known one, not a claim that the order is active or finished.
+    when = (o.get('created_at') or '')[:16].replace('T', ' ')
+    status = text(o.get('status_text') or o.get('status'), 40) or 'no status'
+    return f"Latest order: {when} — «{status}», {money(o.get('total_uzs'))} · {ref(o['order_id'])}."
 
 
 def _country(r):

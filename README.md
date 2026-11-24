@@ -140,7 +140,7 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 | `start_login` · `get_login_status` · `cancel_login` | Sign in with a QR code |
 | `search_addresses` | Find an address by text |
 | `count_saved_addresses` | How many addresses are saved |
-| `get_storefront_status` | Is Lavka open, delivery time |
+| `get_storefront_status` | Start here: is Lavka open, delivery time, sign-in, chosen address, cart and latest order |
 | `select_country` | Switch between UZ, RU and KZ |
 | `reconcile_order_attempt` | Unblock ordering after a dropped connection |
 

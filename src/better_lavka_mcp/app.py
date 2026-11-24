@@ -37,7 +37,8 @@ def uz_only(fn):
 
 
 mcp = FastMCP("Better Lavka", instructions=(
-    "Grocery shopping in Yandex Lavka Uzbekistan. Usual flow: get_storefront_status shows whether the user is signed in "
+    "Grocery shopping in Yandex Lavka Uzbekistan. Usual flow: get_storefront_status first: sign-in, chosen address, what is "
+    "already in the cart and the latest order "
     "(if not, start_login and poll get_login_status); use_address once (it is remembered); then search_products, "
     "add_to_cart (a whole list at once), repeat_order or the catalog; preview_order; and submit_order only after the user "
     "agreed to the exact total. Every result says what to do next. Ids in backticks are short three-word ids such as "

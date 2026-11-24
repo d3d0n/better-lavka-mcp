@@ -12,9 +12,9 @@ from better_lavka_mcp.client import _number, clean_text
 from better_lavka_mcp.errors import UpstreamError
 
 
-async def _cart_client(http, location):
+async def _cart_client(http, location, props=None):
     client_ = client.Lavka(http)
-    props = await client_.bootstrap()
+    props = props or await client_.bootstrap()
     client_._require_login(props)
     info = props.get('pageData', {}).get('serviceInfo', {})
     if not info:
