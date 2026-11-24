@@ -7,7 +7,7 @@ from better_lavka_mcp.orders.tracking import TrackingShapeError, project_trackin
 
 # Synthetic entry shaped like the live tracked-orders/state answer for an order Lavka canceled after creating it.
 CANCELED = {'id': 'order-1', 'shortOrderId': '000000-111-3333', 'status': 'closed', 'resolution': 'canceled',
-            'paymentStatus': 'unknown', 'isCancelable': False, 'clientPrice': '0',
+            'paymentStatus': 'unknown', 'isCancelable': False, 'clientPrice': '0', 'originalPrice': '218560',
             'trackingInfo': {'title': 'Заказ отменён', 'subtitle': 'Вернём деньги на карту'},
             'contact': {'phone': '+998 secret'}, 'couriers': [{'name': 'secret courier'}],
             'depots': [{'depotInfo': {'directions': 'secret directions'}}]}
@@ -26,6 +26,9 @@ def test_tracked_order_keeps_lavkas_verdict_and_drops_personal_data():
 def test_tracked_orders_read_as_lavka_tells_the_user():
     text = render.render('list_active_orders', project_tracking_response([CANCELED]))
     assert 'Lavka says: “Заказ отменён — Вернём деньги на карту” (closed/canceled).' in text
+    # A price of 0 on a canceled order is not proof that nothing is held on the card.
+    assert "Lavka's price for it is now 0 (was 218 560 сум); whether the card was refunded isn't shown here." in text
+    assert 'charged' not in text
     assert 'Can still be canceled' not in text
     assert 'tracking no orders' in render.render('list_active_orders', project_tracking_response([]))
 

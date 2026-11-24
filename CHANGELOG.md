@@ -4,6 +4,12 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-11-24
+
+### Fixed
+- A canceled order's tracking no longer says "charged 0": a price of 0 is Lavka's order price, not a bank record, so it now reads "Lavka's price for it is now 0 (was …); whether the card was refunded isn't shown here".
+- Tracking facts keep their capitals ("Lavka's", "Order №") instead of being lowercased.
+
 ## [0.12.0] — 2026-11-24
 
 ### Added
@@ -223,7 +229,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...v0.11.0

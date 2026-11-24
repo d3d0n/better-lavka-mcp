@@ -304,9 +304,11 @@ def _tracking(t):
     if t.get('number'):
         facts.append(f"order № {text(t['number'], 30)}")
     if t.get('resolution') == 'canceled' and t.get('price_uzs') == '0' and t.get('original_price_uzs'):
-        facts.append(f"charged 0 of {money(t['original_price_uzs'])}")
+        # The order's price, not a bank record: a hold or refund on the card is not visible here.
+        facts.append(f"Lavka's price for it is now 0 (was {money(t['original_price_uzs'])}); whether the card was refunded isn't shown here")
     if facts:
-        line += ' ' + '; '.join(facts).capitalize() + '.'
+        joined = '; '.join(facts)
+        line += ' ' + joined[0].upper() + joined[1:] + '.'
     return line
 
 
