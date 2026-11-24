@@ -268,6 +268,12 @@ def _submit(r):
     if outcome == 'declined':
         return 'The user said no in the confirmation dialog. Nothing was sent or charged; the preview is still valid if they change their mind.'
     if outcome == 'submitted':
+        if r.get('payment_status') in ('cancel', 'canceled', 'cancelled', 'failed', 'rejected'):
+            # Seen live: the order is created, the payment ends as "cancel" and Lavka cancels the order. No reason is given.
+            return (f"**Order {ref(r['order_id'])} was created, but its payment ended as \"{text(r['payment_status'], 20)}\".** "
+                    'Lavka usually cancels such an order. The reason and whether the bank held any money are unknown. '
+                    'Next: get_order to see its status, and ask the user to check their bank app. '
+                    'Do not submit again on your own: ask the user first, and they may want another card.')
         lines = [f"**Order placed** · {ref(r['order_id'])}."]
         lines.append(_payment(r))
         lines.append('Next: list_active_orders while it is on the way; cancel_order if the user changes their mind.')

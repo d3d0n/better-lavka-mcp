@@ -179,6 +179,13 @@ def test_submit_outcomes_say_what_to_do(result, expected):
     assert expected in render.render('submit_order', result)
 
 
+def test_order_whose_payment_was_canceled_is_not_reported_as_on_the_way():
+    # The live response of the first real order: an order id, then payment "cancel".
+    text = render.render('submit_order', {'outcome': 'submitted', 'order_id': 'o1', 'payment_status': 'cancel', 'redirect_url': None})
+    assert 'payment ended as "cancel"' in text and 'get_order' in text and 'Do not submit again' in text
+    assert 'Order placed' not in text and 'on the way' not in text
+
+
 def test_order_total_does_not_subtract_the_discount_twice():
     # Live shape: products price is already discounted (189 110 + 10 + 3 990 = 193 110).
     text = render.render('get_order', {'order_id': 'o1', 'created_at': '2026-11-13T16:15:23', 'status_text': 'Доставлен', 'address': 'x',
