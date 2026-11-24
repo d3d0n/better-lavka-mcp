@@ -1,5 +1,9 @@
 <!-- mcp-name: io.github.d3d0n/better-lavka-mcp -->
-<h1 align="center">Better Lavka MCP 🛒</h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/d3d0n/better-lavka-mcp/main/docs/logo.svg" alt="Better Lavka logo" width="128">
+</p>
+
+<h1 align="center">Better Lavka MCP</h1>
 
 <p align="center">
   <strong>Groceries from Yandex Lavka Uzbekistan, ordered by your AI assistant.</strong>
