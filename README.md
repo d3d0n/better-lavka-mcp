@@ -41,11 +41,13 @@ You sign in once by scanning a QR code in the Yandex app. Everything runs on you
 - **Say where once.** "Deliver home" — the assistant picks your saved address and remembers it next time.
 - **Ask what's on the shelf.** "Is there milk at Chilonzor?" — milk and its price at your Lavka.
 - **Shopping list in one message.** "Milk, bread, six eggs" — all of it lands in the cart in one go. It takes what you bought before; for anything new it shows the options and asks which one.
+- **As usual.** "What do I usually get?" — your favorites and what you bought here, most recent first.
 - **Browse the shelves.** "What's in the dairy section?" — categories and shelves with prices, like in the app.
-- **Same as last time.** "Repeat my last order" — everything from your last order goes back into the cart at today's prices, minus what's sold out.
+- **Same as last time.** "Repeat my last order" — everything from your last order goes back into the cart at today's prices; anything sold out comes with Lavka's own replacements.
+- **Pay less.** Discounts show next to prices; the preview lists your promo codes and coupons and can spend your Plus points.
 - **Read the label.** "How many calories are in this bread?" — calories, protein, fat, carbs, ingredients and shelf life from the product card.
 - **Say yes.** The assistant shows address, items, total and card; you agree, the order goes out, and if the bank wants 3-D Secure you get the link.
-- **Check on orders.** "What did I order last time?", "Cancel my order."
+- **Where is it?** "Where's my order?" — Lavka's own status, minutes left and how far the courier is. "Cancel my order."
 - **Peek at Russia and Kazakhstan.** Browse the RU and KZ storefronts and search their products.
 
 ---
@@ -64,11 +66,14 @@ You sign in once by scanning a QR code in the Yandex app. Everything runs on you
 
 | ✅ Works today | 🚧 Not yet |
 |---|---|
-| Sign in with a QR code from the Yandex app | Courier position and live ETA |
-| Your address and card are remembered | Scheduled delivery slots |
-| Product search, catalog by category, product cards with nutrition, shopping lists, cart editing | |
-| Order history with items, repeat an order, order details | |
-| Order with a chosen card, payment status and 3-D Secure link, cancel an order | |
+| Sign in with a QR code from the Yandex app | Scheduled delivery slots |
+| Your address and card are remembered | Adding to an order that's already placed, or changing its address |
+| Search with discounts, stock and "bought before"; your usual products; catalog and product cards | Tips for the courier |
+| Shopping lists, cart editing, Lavka's replacements for sold-out items | Support chat and order feedback ("the cilantro never came") |
+| Promo codes, coupons and Plus points in the preview | Retrying a failed payment on the same order |
+| Ordering with a saved card, 3-D Secure link, cancelling | Paying in cash |
+| Live tracking: status, minutes left, courier distance | "Tell me when it's back in stock" |
+| Order history, order details, repeat an order | |
 | Browse the RU and KZ storefronts | Ordering in Russia and Kazakhstan |
 
 ---
@@ -115,7 +120,7 @@ Products, orders and categories show up as short ids like `amber fox wave` inste
 
 ## Tools
 
-Twenty-six tools with plain verb + noun names, so the assistant picks the right one on the first try.
+Nineteen tools with plain verb + noun names, so the assistant picks the right one on the first try.
 
 | Tool | What it does |
 |---|---|
