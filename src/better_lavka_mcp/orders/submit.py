@@ -121,7 +121,9 @@ async def snapshot(http, address_index, suffix, expected_address_id=None, prepar
     if not all(position.get(k) for k in ('placeId','country','city','street','house')):
         raise ValueError('Saved address is incomplete')
     # Bind all raw item fields, fees and delivery metadata, not only displayed fields.
-    binding = {'entry': entry, 'position':position, 'info':info, 'cart':cart, 'card':card,
+    # Of service-info only what checkout uses is bound: its delivery texts and price templates change
+    # by the minute (seen live), while this cart's own delivery cost is in the cart and bound there.
+    binding = {'entry': entry, 'position':position, 'info':{k: info.get(k) for k in ('currency', 'currencySign', 'depotId')}, 'cart':cart, 'card':card,
                'index':address_index, 'suffix':suffix, 'expected_address_id':expected_address_id}
     try:
         return json.loads(json.dumps(binding, sort_keys=True, allow_nan=False)), props

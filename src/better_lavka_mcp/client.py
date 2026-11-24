@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from decimal import Decimal, InvalidOperation
 from http.cookiejar import Cookie
 from pathlib import Path
 
@@ -58,6 +59,22 @@ def _order_view(item, detailed=False):
                      'service_fee_uzs': calc.get('serviceFeeV2') or item.get('serviceFeeV2'), 'discount_uzs': calc.get('discount')})
     return view
 
+
+
+def stock(item):
+    """How much one order can take now: {'orderable': N or None, 'low_stock': bool}.
+
+    From Lavka's quantityLimit/maxAmount: the per-order maximum, capped by what the depot has, so 0
+    means sold out but N is not an exact warehouse count. isLowStock is Lavka's own "running low" flag."""
+    limit = item.get('maxAmount') if item.get('maxAmount') is not None else item.get('quantityLimit')
+    try:
+        count = Decimal(str(limit)) if limit is not None and str(limit) != '' else None
+    except (InvalidOperation, ValueError):
+        count = None
+    if count is not None and (not count.is_finite() or count < 0):
+        count = None
+    return {'orderable': None if count is None else (int(count) if count == count.to_integral_value() else float(count)),
+            'low_stock': item.get('isLowStock') is True}
 
 class Lavka:
     def __init__(self, http, region_http=None):
@@ -142,7 +159,7 @@ class Lavka:
         products = []
         for item in raw["cacheProducts"][:limit]:
             if isinstance(item, dict):
-                products.append({"id": item.get("id"), "title": clean_text(item.get("title")), "price": item.get("currentPrice"), "currency": "UZS", "quantity": item.get("amount"), "available": item.get("available")})
+                products.append({"id": item.get("id"), "title": clean_text(item.get("title")), "price": item.get("currentPrice"), "currency": "UZS", "quantity": item.get("amount"), "available": item.get("available"), **stock(item)})
         return {"products": products, "location_supplied": location is not None, "currency_source": region_source, "note": "Availability and price are location dependent; no delivery coverage is implied."}
 
     async def suggest(self, query):
@@ -222,7 +239,7 @@ class Lavka:
                    if isinstance(block, dict) and block.get('title') and block.get('value')}
         return {'id': item['id'], 'title': clean_text(item.get('title')), 'brand': clean_text(item.get('brand')) or None,
                 'price_uzs': item.get('currentPrice'), 'pack': item.get('amount'), 'available': item.get('available'),
-                'max_quantity': _number(item.get('quantityLimit')),
+                'max_quantity': _number(item.get('quantityLimit')), **stock(item),
                 'description': clean_text(item.get('description')) or None,
                 'nutrition_per_100g': per_100g or None,
                 'composition': clean_text(ingredients.get('description')) or None,
@@ -276,7 +293,7 @@ class Lavka:
             for pid in ids:
                 card = cards[pid]
                 products.append({'id': pid, 'title': clean_text(card.get('title')), 'price_uzs': card.get('currentPrice'),
-                                 'pack': card.get('amount'), 'available': card.get('available'), 'subcategory': title})
+                                 'pack': card.get('amount'), 'available': card.get('available'), 'subcategory': title, **stock(card)})
         return {'subcategories': [{'title': title, 'count': len(ids)} for title, ids in shelves],
                 'products': products[:limit], 'total': len(products)}
 

@@ -37,7 +37,9 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         path = request.url.path
         calls.append(path)
         if path.endswith('get-favorite-addresses'): return httpx.Response(200,json=[{'address':address}])
-        if path.endswith('service-info'): return httpx.Response(200,json={'currency':'UZS','currencySign':'sum','depotId':'depot'})
+        if path.endswith('service-info'):
+            # Live service-info changes its delivery texts between preview and submit; checkout must not care.
+            return httpx.Response(200,json={'currency':'UZS','currencySign':'sum','depotId':'depot','deliveryTimeText':f'{len(calls)} мин','l10n':{'deliveryCost':str(len(calls))}})
         if path.endswith('cart/v1/set-payment'):
             # The site's checkout-page call: snake_case body, one-time idempotency header.
             body = json.loads(request.content)

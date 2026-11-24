@@ -4,6 +4,14 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-24
+
+### Added
+- Stock where it changes the next step. Search, category shelves and product cards say "sold out", or "running low, up to N per order" when Lavka flags it. The cart marks lines the depot can't fill ("**sold out**", "**only N can be ordered now**") and, when that blocks checkout, names them and asks the user to remove, lower or replace them instead of a bare "can't order". The number is Lavka's per-order maximum, capped by stock, not a warehouse count.
+
+### Fixed
+- The check before sending an order no longer trips over the delivery-zone texts of `service-info` (delivery time and price templates), which changed between preview and submit on a live order; only its currency and depot are bound to the preview.
+
 ## [0.10.2] — 2026-11-24
 
 ### Fixed
@@ -204,7 +212,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...v0.10.0

@@ -8,7 +8,7 @@ from better_lavka_mcp import client
 from better_lavka_mcp.aliases import resolve
 from better_lavka_mcp.app import _location, tool, uz_only
 from better_lavka_mcp.cart import CartClient
-from better_lavka_mcp.client import _number, clean_text
+from better_lavka_mcp.client import _number, clean_text, stock
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.headers import USER_AGENT
 
@@ -35,7 +35,7 @@ def _cart_view(cart):
             raise UpstreamError('Unexpected cart item')
         items.append({'id': item.get('id'), 'title': clean_text(item.get('title')), 'quantity': item.get('quantity'),
                       'price_uzs': current.get(item.get('id'), item.get('price')), 'pack': item.get('amount'),
-                      'available': item.get('isUnavailableOnDepot') is not True})
+                      'available': item.get('isUnavailableOnDepot') is not True, **stock(item)})
     conditions = cart.get('orderConditions') if isinstance(cart.get('orderConditions'), dict) else {}
     return {'items': items, 'currency': 'UZS',
             'total_uzs': cart.get('totalPriceValue'),

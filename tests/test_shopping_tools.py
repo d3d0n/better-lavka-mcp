@@ -165,7 +165,7 @@ async def test_repeat_last_order_drops_what_the_store_cannot_sell(lavka):
 async def test_set_cart_quantity_needs_no_price_or_coordinates(lavka):
     result = await cart.set_cart_quantity('milk', 3)
     assert lavka.updates == [{'milk': 3}]
-    assert result['items'][0] == {'id': 'milk', 'title': 'Молоко Example 2,5%', 'quantity': '3', 'price_uzs': '15990', 'pack': '1 шт', 'available': True}
+    assert result['items'][0] == {'id': 'milk', 'title': 'Молоко Example 2,5%', 'quantity': '3', 'price_uzs': '15990', 'pack': '1 шт', 'available': True, 'orderable': 24, 'low_stock': False}
     assert (result['delivery_uzs'], result['eta']) == ('10', '15 мин')
 
 
@@ -326,3 +326,29 @@ async def test_preview_accepts_prices_lavka_changed_since_items_were_added(lavka
     assert lavka.updates == [{'kaymak': 1}] and calls == [{'kaymak': 19990}, {}]
     assert result['price_changes'] == [{'id': 'kaymak', 'title': 'Каймак', 'old_uzs': '19990', 'new_uzs': '21990'}]
     assert 'Prices changed since these were added:** Каймак 19 990 сум → 21 990 сум. The total below uses the new prices.' in render.render('preview_order', result)
+
+
+@pytest.mark.asyncio
+async def test_cart_names_what_the_depot_cannot_fill(lavka):
+    # The live shape of a sold-out line: not flagged unavailable, but quantityLimit 0 and checkout blocked.
+    lavka.cart = {'milk': 2, 'kaymak': 5, 'eggs': 1}
+    CATALOG_BEFORE = dict(CATALOG)
+    CATALOG['milk'] = (CATALOG['milk'][0], CATALOG['milk'][1], False, '0')
+    try:
+        result = await cart.get_cart()
+    finally:
+        CATALOG.update(CATALOG_BEFORE)
+    text = render.render('get_cart', {**result, 'available_for_checkout': False, 'checkout_unavailable_reason': 'quantity-over-limit'})
+    assert 'Молоко Example 2,5% ×2 — 15 990 сум each — **sold out**' in text
+    # quantityLimit is a per-order maximum capped by stock, not a warehouse count.
+    assert 'Каймак ×5 — 21 990 сум each — **only 3 can be ordered now**' in text and 'left' not in text
+    assert "Can't order yet: Молоко Example 2,5% is sold out; Каймак can be ordered only up to 3." in text
+
+
+def test_search_marks_sold_out_and_running_low_only():
+    products = [{'id': 'a', 'title': 'Морковь', 'price': '15990', 'orderable': 0, 'low_stock': False},
+                {'id': 'b', 'title': 'Кефир', 'price': '9990', 'orderable': 2, 'low_stock': True},
+                {'id': 'c', 'title': 'Хлеб', 'price': '4990', 'orderable': 30, 'low_stock': False}]
+    text = render.render('search_products', {'products': products})
+    assert 'Морковь — 15 990 сум, sold out' in text and 'Кефир — 9 990 сум, running low, up to 2 per order' in text
+    assert 'Хлеб — 4 990 сум ·' in text  # plenty: no stock noise

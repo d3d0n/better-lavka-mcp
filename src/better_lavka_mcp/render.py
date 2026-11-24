@@ -45,13 +45,46 @@ def money(value, currency='сум'):
     return f'{text} {currency}'
 
 
+def _stock_note(p):
+    """Stock worth saying: sold out, or Lavka's own "running low" flag with the per-order maximum."""
+    if p.get('available') is False or p.get('orderable') == 0:
+        return 'sold out'
+    if p.get('low_stock'):
+        return 'running low' + (f", up to {p['orderable']:g} per order" if p.get('orderable') else '')
+    return None
+
+
 def _product(p, price_key='price_uzs', currency='сум'):
     parts = [money(p.get(price_key), currency)]
     if p.get('pack'):
         parts.append(str(p['pack']))
-    if p.get('available') is False:
-        parts.append('not available now')
+    if note := _stock_note(p):
+        parts.append(note)
     return f"- {text(p.get('title'))} — {', '.join(parts)} · {ref(p.get('id') or p.get('product_id'))}"
+
+
+def _cart_stock(item):
+    """(suffix for the cart line, whether the depot can't fill this line)."""
+    have, want = item.get('orderable'), _qty(item.get('quantity'))
+    if item.get('available') is False or have == 0:
+        return ' — **sold out**', True
+    if have is not None and want is not None and want > have:
+        return f" — **only {have:g} can be ordered now**", True
+    if item.get('low_stock'):
+        return ' — running low', False
+    return '', False
+
+
+def _shortage(item):
+    have = item.get('orderable')
+    return f"{text(item['title'])} is sold out" if not have else f"{text(item['title'])} can be ordered only up to {have:g}"
+
+
+def _qty(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _cart_lines(cart):
@@ -59,8 +92,11 @@ def _cart_lines(cart):
     if not items:
         return ['**Cart is empty.**']
     lines = [f"**Cart** ({len(items)} item{'s' if len(items) != 1 else ''}):"]
+    short = []
     for item in items:
-        note = '' if item.get('available', True) else ' — not available now'
+        note, problem = _cart_stock(item)
+        if problem:
+            short.append(item)
         lines.append(f"- {text(item['title'])} ×{item['quantity']} — {money(item.get('price_uzs'))} each{note} · {ref(item['id'])}")
     total = f"Total **{money(cart.get('total_uzs'))}** incl. delivery {money(cart.get('delivery_uzs'))}"
     if cart.get('eta'):
@@ -68,6 +104,9 @@ def _cart_lines(cart):
     lines.append(total)
     if cart.get('available_for_checkout'):
         lines.append('Ready to order: preview_order shows address, card and the final total.')
+    elif short:
+        lines.append("Can't order yet: " + '; '.join(_shortage(i) for i in short) + '. Ask the user: remove it '
+                     '(set_cart_quantity 0), lower the quantity, or pick a replacement with search_products.')
     elif cart.get('checkout_unavailable_reason') == 'price-mismatch' and cart.get('price_changes'):
         lines.append(_price_changes(cart['price_changes'], accepted=False))
     else:
@@ -157,7 +196,7 @@ def _found_addresses(r):
 
 def _product_card(r):
     lines = [f"**{text(r['title'])}**" + (f" ({text(r['brand'], 60)})" if r.get('brand') else ''),
-             f"{money(r.get('price_uzs'))}, {r.get('pack') or ''}{'' if r.get('available') else ' — not available now'}".rstrip(', ')]
+             f"{money(r.get('price_uzs'))}, {r.get('pack') or ''}" + (f" — {note}" if (note := _stock_note(r)) else '')]
     n = r.get('nutrition_per_100g') or {}
     if n:
         lines.append('Per 100 g: ' + ', '.join(template.format(n[key]) for key, template in
@@ -169,7 +208,7 @@ def _product_card(r):
     if r.get('composition') and r['composition'] not in details.values():
         lines.append(f"Ingredients: {quoted(r['composition'])}")
     lines += [f'{text(k, 60)}: {quoted(v, 300)}' for k, v in details.items()]
-    if r.get('max_quantity'):
+    if r.get('max_quantity') and not (r.get('low_stock') or r.get('available') is False):
         lines.append(f"Up to {r['max_quantity']:g} per order.")
     lines.append(f"Next: add_to_cart with product_id {ref(r['id'])}.")
     return '\n'.join(lines)
