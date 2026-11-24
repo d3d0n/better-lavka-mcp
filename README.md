@@ -90,7 +90,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/). Add this
 
 Or with Claude Code: `claude mcp add lavka -- uvx better-lavka-mcp`.
 
-Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/clients.md).
+Ask the assistant to call `login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/clients.md).
 
 **From source:**
 ```sh
@@ -105,7 +105,7 @@ Then point the client at `/absolute/path/to/better-lavka-mcp/.venv/bin/better-la
 
 Settings:
 
-- `YANDEX_LAVKA_REGION` — startup country: `UZ` (default), `RU` or `KZ`. `select_country` changes it for this process only.
+- `YANDEX_LAVKA_REGION` — country: `UZ` (default), `RU` or `KZ`. In RU and KZ only `get_storefront_status` and `search_products` work; both also take a `country` argument for one call.
 - `YANDEX_SESSION_FILE` — where the session cookies live.
 - `BETTER_LAVKA_MCP_OUTPUT=json` — tools return raw JSON instead of the default short text. The text says what happened, lists the data, and tells the assistant what to do next; JSON is handy for scripts and debugging.
 
@@ -130,18 +130,13 @@ Twenty-six tools with plain verb + noun names, so the assistant picks the right 
 | `set_cart_quantity` | Change or remove one item |
 | `preview_order` | Address, card, items and total before ordering |
 | `submit_order` | Place the order |
-| `get_payment_status` | Payment status and 3-D Secure link |
-| `list_order_history` | Past orders with their items |
-| `get_order` | One past order in full |
+| `list_order_history` | Orders with their items and, while Lavka tracks them, live status: minutes left, courier distance |
+| `get_order` | One order in full: fees, payment status (3-D Secure link), tracking |
 | `cancel_order` | Cancel an order |
-| `list_active_orders` | Whether any orders are currently tracked |
-| `list_saved_addresses` | Your saved addresses |
-| `list_saved_cards` | Your saved cards |
-| `start_login` · `get_login_status` · `cancel_login` | Sign in with a QR code |
+| `get_account` | Who is signed in, saved addresses (which is chosen) and cards (which is remembered) |
+| `login` | Sign in with a QR code; call again until the scan is confirmed |
 | `search_addresses` | Find an address by text |
-| `count_saved_addresses` | How many addresses are saved |
 | `get_storefront_status` | Start here: is Lavka open, delivery time, sign-in, chosen address, cart and latest order |
-| `select_country` | Switch between UZ, RU and KZ |
 | `reconcile_order_attempt` | Unblock ordering after a dropped connection |
 
 ---

@@ -14,7 +14,7 @@ from better_lavka_mcp.tools import orders as order_tools
 @pytest.mark.asyncio
 async def test_order_tools_are_exposed():
     names = {tool.name for tool in await app.mcp.list_tools()}
-    assert {'preview_order', 'submit_order', 'cancel_order', 'list_saved_addresses'} <= names
+    assert {'preview_order', 'submit_order', 'cancel_order', 'get_account'} <= names
 
 @pytest.mark.asyncio
 async def test_every_tool_tells_clients_whether_it_reads_or_spends():

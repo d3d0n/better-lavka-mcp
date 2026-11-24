@@ -1,7 +1,7 @@
 """MCP application: the server instance, tool registration, region selection and delivery state.
 
-One stdio server process serves one client session. The selected region and the
-delivery address are never written to disk as server settings.
+One stdio server process serves one client session. The default region comes from
+YANDEX_LAVKA_REGION; the delivery address is remembered per account in preferences.
 """
 import inspect
 import os
@@ -13,33 +13,28 @@ from mcp.types import ToolAnnotations
 _selected_region = os.environ.get('YANDEX_LAVKA_REGION', 'UZ')
 if _selected_region not in ('UZ', 'RU', 'KZ'):
     raise ValueError('YANDEX_LAVKA_REGION must be UZ, RU or KZ')
-_active_uz_operations = 0
 
 
 def selected_region():
-    """The region this session currently uses unless a tool call overrides it."""
+    """The default region for get_storefront_status and search_products; their country argument overrides it."""
     return _selected_region
 
 
 def uz_only(fn):
-    """Refuse account, cart, login and location tools outside the UZ region."""
+    """Refuse account, cart, login and location tools when the server runs for Russia or Kazakhstan."""
     @wraps(fn)
     async def guarded(*args, **kwargs):
-        global _active_uz_operations
         if _selected_region != 'UZ':
-            raise ValueError('UZ-only tool: select UZ before using account, cart, login or location tools')
-        _active_uz_operations += 1
-        try:
-            return await fn(*args, **kwargs)
-        finally:
-            _active_uz_operations -= 1
+            raise ValueError('UZ-only tool: this server runs with YANDEX_LAVKA_REGION=' + _selected_region
+                             + '; in RU and KZ only get_storefront_status and search_products work')
+        return await fn(*args, **kwargs)
     return guarded
 
 
 mcp = FastMCP("Better Lavka", instructions=(
     "Grocery shopping in Yandex Lavka Uzbekistan. Usual flow: get_storefront_status first, it shows sign-in, the chosen "
-    "address, what is already in the cart and the latest order (if not signed in, start_login and poll get_login_status); "
-    "use_address once (it is remembered); then search_products, "
+    "address, what is already in the cart and the latest order (if not signed in, call login and then call it again "
+    "until the user has scanned the QR code); use_address once (it is remembered); then search_products, "
     "add_to_cart (a whole list at once), repeat_order or the catalog; preview_order; and submit_order only after the user "
     "agreed to the exact total. Every result says what to do next. Ids in backticks are short three-word ids such as "
     "`amber fox wave`: pass them exactly as shown wherever a product_id, order_id or category_id is asked. "
@@ -54,11 +49,10 @@ def _hints(read_only=False, destructive=False, idempotent=False, open_world=True
 # Clients use these to decide what to ask the user about; a tool without hints counts as destructive.
 ANNOTATIONS = {
     **dict.fromkeys(('search_products', 'search_addresses', 'get_product', 'list_categories', 'get_category_products',
-                     'get_storefront_status', 'get_cart', 'list_saved_addresses', 'count_saved_addresses', 'list_saved_cards',
-                     'list_order_history', 'get_order', 'list_active_orders', 'get_payment_status'),
+                     'get_storefront_status', 'get_cart', 'get_account', 'list_order_history', 'get_order'),
                     _hints(read_only=True)),
-    **dict.fromkeys(('select_country', 'use_address'), _hints(idempotent=True, open_world=False)),
-    **dict.fromkeys(('start_login', 'get_login_status', 'cancel_login'), _hints()),
+    'use_address': _hints(idempotent=True, open_world=False),
+    'login': _hints(),
     'add_to_cart': _hints(), 'repeat_order': _hints(),
     # Re-saves cart lines Lavka repriced, so it writes the cart; it never orders or charges.
     'preview_order': _hints(idempotent=True),
@@ -85,24 +79,6 @@ def tool():
         mcp.tool(structured_output=False, annotations=ANNOTATIONS[fn.__name__])(as_text)
         return fn
     return register
-
-
-@tool()
-async def select_country(country: str) -> dict:
-    """Set the default country for this server session to UZ, RU or KZ (in memory only; not saved). UZ enables account, cart and checkout tools; RU and KZ allow only search_products and get_storefront_status. Places no order."""
-    global _selected_region
-    if country not in ('UZ', 'RU', 'KZ'):
-        raise ValueError('Unsupported country: supported countries are RU, KZ, UZ')
-    if _active_uz_operations and country != _selected_region:
-        raise ValueError('Cannot change region while a UZ operation is in progress')
-    _selected_region = country
-    uz = country == 'UZ'
-    return {'country': country, 'supported': True, 'persistent': False, 'session_scoped': True,
-            'read_only_tools': ['get_storefront_status', 'search_products'],
-            'uz_account_and_checkout_tools_available': uz,
-            'note': ('Selection lasts for this stdio session; status/search use it unless overridden. '
-                     + ('UZ account, cart and checkout tools are available but not guaranteed to succeed.' if uz else
-                        'RU/KZ reads are anonymous; account, cart and checkout tools are UZ-only. Do not use them for this region.'))}
 
 
 # The delivery address chosen with use_address; remembered between sessions, for the account that chose it.

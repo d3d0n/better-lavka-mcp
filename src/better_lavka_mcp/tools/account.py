@@ -1,10 +1,8 @@
 """Account and history tools: saved addresses, cards, orders and the tracking feed."""
 from better_lavka_mcp import client
 from better_lavka_mcp.aliases import resolve
-from better_lavka_mcp.app import _location, _remember_delivery, account_fingerprint, tool, uz_only
-from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.app import _current_delivery, _remember_delivery, account_fingerprint, tool, uz_only
 from better_lavka_mcp.errors import UpstreamError
-from better_lavka_mcp.headers import api_headers
 from better_lavka_mcp.orders import submit as orders
 
 
@@ -17,7 +15,7 @@ def _address_summary(entry, index):
 @tool()
 @uz_only
 async def use_address(address: str) -> dict:
-    """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or index from list_saved_addresses. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
+    """Choose the delivery address by saved-address name ("Дом", "home"), part of the street, or its number from get_account. It is remembered for later sessions; search, cart and ordering then use it without coordinates."""
     if not isinstance(address, str) or not address.strip():
         raise ValueError('Name the saved address, for example "home"')
     from better_lavka_mcp.auth.qr import cookie_identity
@@ -60,46 +58,53 @@ async def use_address(address: str) -> dict:
 
 @tool()
 @uz_only
-async def count_saved_addresses() -> dict:
-    """Read-only: return the number of saved favorite addresses without their details. Requires an authenticated Uzbekistan session."""
-    async with client.create_http() as http:
-        return await client.Lavka(http).saved_address_count()
-
-
-@tool()
-@uz_only
-async def list_saved_addresses() -> dict:
-    """Your saved delivery addresses with their index and name. Pick one for the session with use_address."""
-    async with client.create_http() as http:
-        _, entries = await orders.addresses(http)
-        return {'addresses': [{'index': i, 'address': entry['address']} for i, entry in enumerate(entries)]}
-
-
-@tool()
-@uz_only
-async def list_saved_cards(longitude: float | None = None, latitude: float | None = None) -> dict:
-    """Your saved cards as "**** 1234", for the address chosen with use_address (or at longitude, latitude)."""
+async def get_account() -> dict:
+    """Read-only: who is signed in, the saved delivery addresses (which one is chosen) and the saved cards (which one is remembered for paying). Choose an address with use_address, a card with preview_order(card_last4=...)."""
+    from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
     async with client.create_http() as http:
-        location = _location(http, longitude, latitude)
         props = await client.Lavka(http).bootstrap()
-        cards = await PaymentClient(http, props, location).lookup()
-        return {'cards': cards.masked_cards}
+        if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
+            return {'signed_in': False}
+        login = next((c.value for c in http.cookies.jar if c.name == 'yandex_login' and c.value), None)
+        _, entries = await orders.addresses(http)
+        delivery = _current_delivery(http)
+        chosen = delivery.get('address_id') if delivery else None
+        location = delivery['location'] if delivery else next(
+            (e['address'].get('location') for e in entries if isinstance(e['address'].get('location'), list)), None)
+        cards = (await PaymentClient(http, props, location).lookup()).masked_cards if location else []
+    remembered = preferences.load().get('card_last4')
+    return {'signed_in': True, 'login': login,
+            'addresses': [{'index': i, 'address': e['address'], 'chosen': chosen is not None and e.get('addressId') == chosen}
+                          for i, e in enumerate(entries)],
+            'cards': [{'card': mask, 'remembered': mask[-4:] == remembered} for mask in cards]}
 
 
 @tool()
 @uz_only
 async def list_order_history(limit: int = 21, older_than: str | None = None) -> dict:
-    """Past orders, newest first, with their items, total and address. For the next page pass next_older_than as older_than. limit is 1–21."""
+    """Orders, newest first: items, total, address and, for orders Lavka still tracks, its live status ("Курьер в пути", minutes left, courier distance; "Заказ отменён — Вернём деньги на карту"). For the next page pass next_older_than as older_than. limit is 1–21."""
+    from better_lavka_mcp.orders.tracking import tracked_orders
     async with client.create_http() as http:
-        return await client.Lavka(http).order_history(limit, None if older_than is None else resolve(older_than))
+        lavka = client.Lavka(http)
+        history = await lavka.order_history(limit, None if older_than is None else resolve(older_than))
+        try:
+            live = await tracked_orders(http, lavka.props)
+        except UpstreamError:
+            history['tracking'] = 'unknown'
+            return history
+        for order in history['orders']:
+            if order['order_id'] in live:
+                order['tracking'] = live[order['order_id']]
+        return history
 
 
 @tool()
 @uz_only
 async def get_order(order_id: str) -> dict:
-    """One past order in full: items, products, delivery, service fee, discount, total, address and status, plus what Lavka's tracking screen says about it (e.g. "Заказ отменён — Вернём деньги на карту")."""
+    """One order in full: items, products, delivery, service fee, discount, total, address and status, its payment status (with the 3-D Secure link when the bank asks for one) and what Lavka's tracking screen says (minutes left, courier distance, "Заказ отменён — Вернём деньги на карту")."""
     from better_lavka_mcp.orders.tracking import tracking_state
+    from better_lavka_mcp.payment import payment_status
     order_id = resolve(order_id)
     async with client.create_http() as http:
         lavka = client.Lavka(http)
@@ -108,39 +113,8 @@ async def get_order(order_id: str) -> dict:
             order['tracking'] = (await tracking_state(http, lavka.props, [order_id])).get(order_id)
         except UpstreamError:
             order['tracking'] = {'state': 'unknown'}
-        return order
-
-
-@tool()
-@uz_only
-async def get_payment_status(order_id: str) -> dict:
-    """Payment status of an order (success, wait_user_action, failed…). When the bank asks for 3-D Secure it also returns redirect_url to open."""
-    from better_lavka_mcp.payment import payment_status
-    async with client.create_http() as http:
-        props = await client.Lavka(http).bootstrap()
-        return await payment_status(http, props, resolve(order_id))
-
-
-@tool()
-@uz_only
-async def list_active_orders() -> dict:
-    """Read-only: orders Lavka is tracking (recent ones, closed included) with their status and what Lavka tells the user, e.g. "Курьер в пути" or "Заказ отменён — Вернём деньги на карту". An empty feed does not prove there are no orders and cannot reconcile an uncertain submission."""
-    async with client.create_http() as http:
-        props = await client.Lavka(http).bootstrap()
-        if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
-            raise UpstreamError('An authenticated Uzbekistan session is required')
-        headers = api_headers(props)
         try:
-            response = await http.get(BASE + '/api/v1/providers/orders-tracking/v1/tracked-orders', headers=headers)
-            if response.status_code != 200:
-                raise UpstreamError(f'Active-order endpoint HTTP {response.status_code}')
-            data = response.json()
+            order['payment'] = await payment_status(http, lavka.props, order_id)
         except UpstreamError:
-            raise
-        except Exception:
-            raise UpstreamError('Active-order read failed or was not JSON') from None
-        from better_lavka_mcp.orders.tracking import TrackingShapeError, project_tracking_response
-        try:
-            return project_tracking_response(data)
-        except TrackingShapeError:
-            raise UpstreamError('Unverified active-order response; no conclusion possible') from None
+            order['payment'] = {'state': 'unknown'}
+        return order

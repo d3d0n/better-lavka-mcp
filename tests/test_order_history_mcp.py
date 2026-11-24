@@ -51,17 +51,6 @@ async def test_get_order_reads_one_order_with_fees():
 
 
 @pytest.mark.asyncio
-async def test_mcp_history_tool_delegates_to_authenticated_client(monkeypatch):
-    from better_lavka_mcp import client
-    from better_lavka_mcp.tools import account
-    async def fake_history(self, count, older_than):
-        return {"orders": [], "count": count, "cursor": older_than}
-    monkeypatch.setattr(client.Lavka, "order_history", fake_history)
-    result = await account.list_order_history(5, None)
-    assert result == {"orders": [], "count": 5, "cursor": None}
-
-
-@pytest.mark.asyncio
 async def test_cancel_route_is_not_allowlisted_even_with_mock_transport():
     async def handler(request):
         pytest.fail("cancel request must not be sent")

@@ -76,7 +76,7 @@
 !/tests/
 /tests/*
 !/tests/conftest.py
-!/tests/test_active_orders_mcp.py
+!/tests/test_order_history_tracking.py
 !/tests/test_cancel_order_safe.py
 !/tests/test_cancel_uncertain.py
 !/tests/test_cart_context_strategy.py

@@ -132,20 +132,3 @@ async def test_location_needs_address_or_valid_coordinates(saved):
     for lon, lat in [(54, 41), (69, 47), (float('nan'), 41), (True, 41), (69, None)]:
         with pytest.raises(ValueError):
             app._location(ANONYMOUS, lon, lat)
-
-
-@pytest.mark.asyncio
-async def test_country_selection_fails_closed_without_network(monkeypatch):
-    monkeypatch.setattr(client, 'create_http', lambda: pytest.fail('network not expected'))
-    for country in ('UZ', 'RU', 'KZ'):
-        result = await app.select_country(country)
-        assert result['country'] == country and result['persistent'] is False
-        assert result['read_only_tools'] == ['get_storefront_status', 'search_products']
-        assert result['uz_account_and_checkout_tools_available'] is (country == 'UZ')
-    with pytest.raises(ValueError, match='Unsupported'):
-        await app.select_country('US')
-    for country in ('RU', 'KZ'):
-        await app.select_country(country)
-        with pytest.raises(ValueError, match='UZ-only'):
-            await account.use_address('home')
-    await app.select_country('UZ')

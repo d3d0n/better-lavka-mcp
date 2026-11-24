@@ -6,7 +6,7 @@ The server speaks MCP over **stdio**: the client starts a local process and comm
 
 Replace `/absolute/path/to/repository` in the examples with the absolute path to your checkout. The installed `better-lavka-mcp` console script must exist in that virtualenv; the examples target Unix-like systems. Merge the server entry into any existing configuration rather than overwriting other settings. Review project-level configurations before sharing them: absolute paths are machine-specific, and MCP servers can execute local programs.
 
-Choose the initial country by adding `"env": {"YANDEX_LAVKA_REGION": "KZ"}` to the server entry (Oh My Pi, Claude Code and Claude Desktop), or `"environment": {"YANDEX_LAVKA_REGION": "KZ"}` for OpenCode. Use exactly `UZ`, `RU`, or `KZ`; omission defaults to `UZ`, and invalid values prevent startup. After connecting, call `select_country` to change the country for this server process. A restart restores the configured startup country. RU/KZ support anonymous status and search only; UZ account, login start/status, cart and order tools are blocked when those regions are selected. `cancel_login` remains available in every region to clean up a pending UZ login. An in-flight UZ operation must finish before switching. See [country and delivery location](../README.md#country-and-delivery-location).
+Choose the initial country by adding `"env": {"YANDEX_LAVKA_REGION": "KZ"}` to the server entry (Oh My Pi, Claude Code and Claude Desktop), or `"environment": {"YANDEX_LAVKA_REGION": "KZ"}` for OpenCode. Use exactly `UZ`, `RU`, or `KZ`; omission defaults to `UZ`, and invalid values prevent startup. To ask about another country for a single call, pass `country` to `get_storefront_status` or `search_products`.
 
 ### Oh My Pi
 
@@ -83,7 +83,7 @@ To use a non-default session file, add `YANDEX_SESSION_FILE` with an absolute, p
 
 1. Restart or reconnect the client and inspect its MCP server/tool list. A connection alone does not verify live API access.
 2. Ask it to call `get_storefront_status`. This is a homepage status, not a coverage check for your address; network or upstream changes can still cause an error.
-3. For account tools, request `start_login` in a private channel and complete the [QR flow](auth.md). A client may not render images; the tool also returns a link. Treat both as credentials.
+3. For account tools, request `login` in a private channel and complete the [QR flow](auth.md). A client may not render images; the tool also returns a link. Treat both as credentials.
 4. Ask it to `use_address` with the name of a saved address ("Дом", "Work"); search, cart and ordering then need no coordinates. Without it, pass longitude first, latitude second.
 
 If the server fails to start, check the absolute console script path, virtualenv dependencies, and the client's stderr/logs. Never paste raw logs containing QR links, cookies or account information into an issue. Client-specific rendering and live connectivity are not guaranteed by a successful local test.

@@ -13,6 +13,12 @@ CANCELED = {'id': 'order-1', 'shortOrderId': '000000-111-3333', 'status': 'close
             'depots': [{'depotInfo': {'directions': 'secret directions'}}]}
 
 
+def _history(feed):
+    """A history page whose orders carry these tracking entries, as list_order_history returns it."""
+    return {'orders': [{'order_id': o['order_id'], 'created_at': '2026-11-24', 'status_text': 'x', 'total_uzs': '1',
+                        'address': 'Example street, 1', 'items': [], 'tracking': o} for o in feed['orders']], 'next_older_than': None}
+
+
 def test_tracked_order_keeps_lavkas_verdict_and_drops_personal_data():
     result = project_tracking_response([CANCELED])
     order = result['orders'][0]
@@ -24,13 +30,12 @@ def test_tracked_order_keeps_lavkas_verdict_and_drops_personal_data():
 
 
 def test_tracked_orders_read_as_lavka_tells_the_user():
-    text = render.render('list_active_orders', project_tracking_response([CANCELED]))
+    text = render.render('list_order_history', _history(project_tracking_response([CANCELED])))
     assert 'Lavka says: “Заказ отменён — Вернём деньги на карту” (closed/canceled).' in text
     # A price of 0 on a canceled order is not proof that nothing is held on the card.
     assert "Lavka's price for it is now 0 (was 218 560 сум); whether the card was refunded isn't shown here." in text
     assert 'charged' not in text
     assert 'Can still be canceled' not in text
-    assert 'tracking no orders' in render.render('list_active_orders', project_tracking_response([]))
 
 
 @pytest.mark.parametrize('data', [{}, {'orders': []}, None, 'secret', 0, False, [{'status': 'closed'}], ['secret']])
@@ -52,7 +57,7 @@ DELIVERING = {'id': 'order-2', 'shortOrderId': '000000-111-2222', 'status': 'del
 
 
 def test_order_on_its_way_shows_time_left_courier_distance_and_number():
-    text = render.render('list_active_orders', project_tracking_response([DELIVERING]))
+    text = render.render('list_order_history', _history(project_tracking_response([DELIVERING])))
     assert '“Доставим до ~19:55 — Курьер в пути” (delivering).' in text
     # ~0.49 km between the courier and the door, from the [lon, lat] points Lavka sends.
     assert 'About 7 min to go; courier on bicycle 493 m away; heavy order; order № 000000-111-2222.' in text

@@ -431,9 +431,9 @@ async def _await_payment(http, props, order_id, started=None):
             break
     last = {**last, 'trace': trace}
     if last['redirect_url']:
-        last['note'] = 'The bank asks for 3-D Secure: open redirect_url to confirm the payment, then check get_payment_status.'
+        last['note'] = 'The bank asks for 3-D Secure: open redirect_url to confirm the payment, then check get_order.'
     elif last['payment_status'] not in TERMINAL_PAYMENT_STATUSES:
-        last['note'] = 'Payment is still processing; check get_payment_status in a moment.'
+        last['note'] = 'Payment is still processing; check get_order in a moment.'
     return last
 
 

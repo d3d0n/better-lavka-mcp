@@ -346,7 +346,7 @@ def create_http():
     try:
         data = json.loads(raw)
     except ValueError:
-        raise UpstreamError("Saved session file is not valid JSON; sign in again with start_login") from None
+        raise UpstreamError("Saved session file is not valid JSON; sign in again with login") from None
     if not isinstance(data, dict) or not isinstance(data.get("cookies"), list):
         raise UpstreamError("Invalid saved cookie jar")
     for item in data["cookies"]:

@@ -139,9 +139,18 @@ def test_preview_without_any_card_does_not_ask_to_pick_one():
     assert 'Lavka app' in text and 'card_last4' not in text
 
 
+# A get_order result as the client returns it, for checking the lines tools add to it.
+ORDER_VIEW = {'order_id': 'o1', 'created_at': '2026-11-24T14:34:00', 'status_text': 'Доставлен', 'address': 'Example street, 1',
+              'items': [], 'products_uzs': '1', 'delivery_uzs': '0', 'service_fee_uzs': None, 'total_uzs': '1', 'discount_uzs': '0'}
+
+
+def test_order_says_when_payment_status_is_unknown():
+    text = render.render('get_order', {**ORDER_VIEW, 'payment': {'state': 'unknown'}})
+    assert "Payment status: unknown (Lavka didn't answer)." in text
+
 @pytest.mark.parametrize('status', ['cancel', 'canceled', 'cancelled'])
 def test_terminal_cancel_statuses_are_not_shown_as_pending(status):
-    text = render.render('get_payment_status', {'payment_status': status, 'redirect_url': None})
+    text = render.render('get_order', {**ORDER_VIEW, 'payment': {'payment_status': status, 'redirect_url': None}})
     assert 'payment canceled' in text and 'still processing' not in text
 
 
@@ -190,8 +199,8 @@ def test_order_whose_payment_was_canceled_is_not_reported_as_on_the_way():
 
 
 def test_card_payment_error_text_from_lavka_is_shown():
-    text = render.render('get_payment_status', {'payment_status': 'fail', 'redirect_url': None,
-                                                'payment_error': {'title': 'Оплата не прошла', 'text': 'Недостаточно средств'}})
+    text = render.render('get_order', {**ORDER_VIEW, 'payment': {'payment_status': 'fail', 'redirect_url': None,
+                                                                 'payment_error': {'title': 'Оплата не прошла', 'text': 'Недостаточно средств'}}})
     assert 'payment failed' in text and '“Оплата не прошла — Недостаточно средств”' in text
 
 

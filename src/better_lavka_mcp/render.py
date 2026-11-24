@@ -143,7 +143,7 @@ def _search(r):
     for p in r['products']:
         lines.append(_product({**p, 'pack': p.get('quantity')}, 'price', currency))
     if regional:
-        lines.append(f"{r['country']} prices are for reference: the cart, product cards and ordering work in Uzbekistan only (select_country UZ).")
+        lines.append(f"{r['country']} prices are for reference: the cart, product cards and ordering work in Uzbekistan only.")
     else:
         lines.append('Next: add_to_cart with a product_id, or get_product for calories and ingredients.')
     return '\n'.join(lines)
@@ -176,13 +176,22 @@ def _use_address(r):
     return '\n'.join(lines)
 
 
-def _addresses(r):
-    lines = ['Saved addresses (pick one with use_address by name or number):']
+def _account(r):
+    if not r.get('signed_in'):
+        return 'Not signed in: call login.'
+    lines = ['Signed in' + (f" as {text(r['login'], 60)}" if r.get('login') else '') + '.']
+    lines.append('Saved addresses (choose one with use_address by name or number):' if r['addresses']
+                 else 'No saved addresses: the user adds one in the Lavka app.')
     for a in r['addresses']:
         addr = a['address']
         extra = ', '.join(f'{k} {text(addr[k], 20)}' for k in ('entrance', 'floor', 'flat') if addr.get(k))
         lines.append(f"{a['index']}. {text(addr.get('label'), 60) or '(no name)'} — {text(addr.get('shortAddress') or addr.get('fullAddress'))}"
-                     + (f' ({extra})' if extra else ''))
+                     + (f' ({extra})' if extra else '') + (' · **chosen**' if a.get('chosen') else ''))
+    if r['cards']:
+        lines.append('Cards: ' + ', '.join(c['card'] + (' (remembered for paying)' if c['remembered'] else '') for c in r['cards'])
+                     + '. Another card: preview_order(card_last4="1234").')
+    else:
+        lines.append('No saved cards: the user adds one in the Lavka app.')
     return '\n'.join(lines)
 
 
@@ -235,12 +244,6 @@ def _category(r):
     return '\n'.join(lines)
 
 
-def _cards(r):
-    if not r['cards']:
-        return 'No saved cards. The user adds one in the Lavka app.'
-    return 'Saved cards: ' + ', '.join(r['cards']) + '. Pass the last four digits as card_last4 to preview_order.'
-
-
 def _history(r):
     if not r['orders']:
         return 'No orders yet.'
@@ -248,8 +251,12 @@ def _history(r):
     for o in r['orders']:
         lines.append(f"**{(o.get('created_at') or '')[:10]}** — {text(o.get('status_text') or o.get('status'), 40)}, {money(o.get('total_uzs'))}"
                      f" · {text(o.get('address'))} · {ref(o['order_id'])}")
+        if o.get('tracking'):
+            lines.append(f"  {_tracking(o['tracking'])}{_still_possible(o['tracking'])}")
         lines += [f"  - {text(i['name'])} ×{i['quantity']} — {money(i.get('price_uzs'))}" for i in o['items']]
-    lines.append('Next: repeat_order with an order id puts it back in the cart; get_order shows fees.')
+    if r.get('tracking') == 'unknown':
+        lines.append("Live status: unknown (Lavka's tracking didn't answer) — get_order shows it for one order.")
+    lines.append('Next: repeat_order with an order id puts it back in the cart; get_order shows fees and payment.')
     if r.get('next_older_than'):
         lines.append(f"More: list_order_history(older_than=\"{aliases.short(r['next_older_than'])}\").")
     return '\n'.join(lines)
@@ -262,7 +269,9 @@ def _order(r):
     lines.append(f"Products {money(r.get('products_uzs'))} + delivery {money(r.get('delivery_uzs'))} + service fee {money(r.get('service_fee_uzs'))}"
                  f" = **{money(r.get('total_uzs'))}** (discount of {money(r.get('discount_uzs'))} already included).")
     if 'tracking' in r:
-        lines.append(_tracking(r['tracking']))
+        lines.append(_tracking(r['tracking']) + _still_possible(r['tracking'] or {}))
+    if 'payment' in r:
+        lines.append("Payment status: unknown (Lavka didn't answer)." if r['payment'].get('state') == 'unknown' else _payment(r['payment']))
     lines.append('Next: repeat_order with this id to order it again.')
     return '\n'.join(lines)
 
@@ -280,6 +289,11 @@ def _payment(r):
     if error:
         line += ' Lavka says: ' + quoted(' — '.join(v for v in (error.get('title'), error.get('text')) if v), 300)
     return line
+
+
+def _still_possible(t):
+    can = [label for key, label in (('cancelable', 'canceled'), ('can_edit_address', 'given another address')) if t.get(key)]
+    return f" Can still be {' or '.join(can)}." if can else ''
 
 
 def _tracking(t):
@@ -369,7 +383,7 @@ def _submit(r):
             return '\n'.join(lines)
         lines = [f"**Order placed** · {ref(r['order_id'])}."]
         lines.append(_payment(r))
-        lines.append('Next: list_active_orders while it is on the way; cancel_order if the user changes their mind.')
+        lines.append('Next: get_order or list_order_history show where it is; cancel_order if the user changes their mind.')
         return '\n'.join(lines)
     if outcome == 'rejected':
         lines = ['**Lavka rejected the order.** Nothing was charged.']
@@ -383,16 +397,6 @@ def _submit(r):
             'then start over with preview_order.')
 
 
-def _active(r):
-    if not r.get('orders'):
-        return 'Lavka is tracking no orders. A just-placed order can take a moment to show up; list_order_history has the full list.'
-    lines = ['Orders Lavka is tracking:']
-    for o in r['orders']:
-        can = [label for key, label in (('cancelable', 'canceled'), ('can_edit_address', 'given another address')) if o.get(key)]
-        lines.append(f"- {ref(o['order_id'])}: {_tracking(o)}" + (f" Can still be {' or '.join(can)}." if can else ''))
-    return '\n'.join(lines)
-
-
 def _status(r):
     if r.get('is_open') is None and r.get('is_disabled') is None:
         store = 'status unknown'
@@ -401,7 +405,7 @@ def _status(r):
     name = f"Lavka{(' ' + r['country']) if r.get('country') else ''}"
     lines = [f"{name}: {store}; delivery {text(r.get('advertised_delivery_time'), 40) or 'time unknown'}."]
     if r.get('passport_status') is not None:
-        lines.append('Signed in.' if r['passport_status'] == 'VALID' else 'Not signed in: call start_login.')
+        lines.append('Signed in.' if r['passport_status'] == 'VALID' else 'Not signed in: call login.')
     if 'delivery_address' in r:
         a = r['delivery_address']
         lines.append(f"Delivering to **{text(a.get('label'), 60) or 'saved address'}**: {text(a.get('short_address'))}." if a
@@ -439,31 +443,25 @@ def _latest_order(o):
     return f"Latest order: {when} — «{status}», {money(o.get('total_uzs'))} · {ref(o['order_id'])}."
 
 
-def _country(r):
-    if r['country'] == 'UZ':
-        return 'Country: Uzbekistan. All tools are available.'
-    return f"Country: {r['country']}. Only get_storefront_status and search_products work here (anonymously); ordering is Uzbekistan-only."
-
-
 def _login_status(r):
     meaning = {
-        'pending': 'Waiting for the QR scan. Call get_login_status again in a few seconds.',
-        'authenticated': 'Signed in. Next: use_address to pick where to deliver.',
-        'login_required': 'Not signed in. Call start_login.',
-        'expired': 'The QR code expired. Call start_login for a new one.',
-        'already_pending': 'A login is already waiting for the scan. Call get_login_status.',
-        'replacement_requires_approval': 'Already signed in. To switch accounts, ask the user and call start_login(replace_existing_session=true).',
+        'pending': 'Waiting for the QR scan. Call login again in a few seconds.',
+        'authenticated': 'Signed in. Next: use_address to pick where to deliver (get_account lists the addresses).',
+        'login_required': 'Not signed in. Call login.',
+        'expired': 'The QR code expired. Call login for a new one.',
+        'already_pending': 'A login is already waiting for the scan. Call login again to check it.',
+        'replacement_requires_approval': 'Already signed in. To switch accounts, ask the user and call login(replace_existing_session=true).',
         'cancelled': 'Login cancelled.',
         'session_changed': 'Signed in elsewhere meanwhile; the existing session was kept.',
     }
     return meaning.get(r.get('status'), f"Login: {r.get('status')}. {r.get('note') or ''}").strip()
 
 
-def _start_login(r):
-    if r.get('status') != 'pending':
+def _login(r):
+    if r.get('status') != 'pending' or not r.get('qr_url'):
         return _login_status(r)
     return ('Scan the QR code below in the Yandex app (or open this link on the phone where the Yandex app is signed in): '
-            f"{r['qr_url']}\nThe link is a login key: show it only to the user. Then call get_login_status every few seconds.")
+            f"{r['qr_url']}\nThe link is a login key: show it only to the user. Then call login again every few seconds.")
 
 
 def _reconcile(r):
@@ -478,18 +476,13 @@ def _cancel(r):
     return 'Cancellation sent, but not confirmed yet. Check list_order_history in a minute; do not send it again.'
 
 
-def _count(r):
-    return f"{r['count']} saved address(es). list_saved_addresses shows them."
-
-
 RENDERERS = {
     'search_products': _search, 'add_to_cart': _add, 'repeat_order': _add, 'get_cart': _cart, 'set_cart_quantity': _cart,
-    'use_address': _use_address, 'list_saved_addresses': _addresses, 'search_addresses': _found_addresses,
+    'use_address': _use_address, 'get_account': _account, 'search_addresses': _found_addresses,
     'get_product': _product_card, 'list_categories': _categories, 'get_category_products': _category,
-    'list_saved_cards': _cards, 'list_order_history': _history, 'get_order': _order, 'get_payment_status': _payment,
-    'preview_order': _preview, 'submit_order': _submit, 'list_active_orders': _active, 'get_storefront_status': _status,
-    'select_country': _country, 'get_login_status': _login_status, 'cancel_login': _login_status, 'start_login': _start_login,
-    'reconcile_order_attempt': _reconcile, 'cancel_order': _cancel, 'count_saved_addresses': _count,
+    'list_order_history': _history, 'get_order': _order,
+    'preview_order': _preview, 'submit_order': _submit, 'get_storefront_status': _status,
+    'login': _login, 'reconcile_order_attempt': _reconcile, 'cancel_order': _cancel,
 }
 
 

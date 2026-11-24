@@ -8,7 +8,7 @@ from better_lavka_mcp.tools import account, cart
 
 
 @pytest.mark.asyncio
-async def test_cart_mcp_read_update_and_masked_cards(monkeypatch):
+async def test_cart_read_update_and_account_cards_are_masked(monkeypatch):
     calls = []
     def handle(request):
         path = request.url.path
@@ -24,6 +24,8 @@ async def test_cart_mcp_read_update_and_masked_cards(monkeypatch):
         if path.endswith('/update'):
             assert json.loads(request.content)['items'][0]['quantity'] == '1'
             return httpx.Response(200, json={})
+        if path.endswith('get-favorite-addresses'):
+            return httpx.Response(200, json=[{'addressId': 'a1', 'address': {'label': 'Дом', 'shortAddress': 'Example street, 1', 'location': [69, 41]}}])
         if path.endswith('/methods'):
             return httpx.Response(200, json={'methods': [{'type': 'card', 'availability': {'available': True}, 'id': 'secret-card', 'number': '1234567890123456'}]})
         raise AssertionError(path)
@@ -32,5 +34,7 @@ async def test_cart_mcp_read_update_and_masked_cards(monkeypatch):
     result = await cart.set_cart_quantity('product', 1, 69, 41)
     assert result['items'][0]['quantity'] == '1'
     assert 'secret-cart' not in json.dumps(result)
-    assert (await account.list_saved_cards(69, 41))['cards'] == ['**** 3456']
+    profile = await account.get_account()
+    assert profile['cards'] == [{'card': '**** 3456', 'remembered': False}]
+    assert [a['address']['label'] for a in profile['addresses']] == ['Дом'] and 'secret-card' not in json.dumps(profile)
     assert not any('submit' in path for path in calls)

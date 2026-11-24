@@ -173,34 +173,33 @@ def register_qr_tools(mcp, session_path, guard=None):
     def as_text(tool, result):
         return json.dumps(result) if json_output() else render(tool, result)
 
-    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['start_login'])
+    @mcp.tool(name='login', structured_output=False, annotations=ANNOTATIONS['login'])
     @guard
-    async def start_login(replace_existing_session: bool = False):
-        """Sign in to Lavka: returns a QR code to scan in the Yandex app and a short-lived link to open on the phone instead. Both are login keys: show them only to the user. replace_existing_session=true switches accounts and needs the user's approval."""
+    async def login_tool(replace_existing_session: bool = False, cancel: bool = False):
+        """Sign in to Lavka with a QR code, one call at a time. Not signed in: returns a QR code to scan in the Yandex app and a short-lived link to open on the phone instead; both are login keys, show them only to the user. Call again to see whether the scan went through; it saves the session once Lavka confirms it. Already signed in: says so; replace_existing_session=true switches accounts and needs the user's approval. cancel=true stops a pending QR login without signing out. Never returns credentials."""
         import base64
 
         from mcp.types import ImageContent, TextContent
+        if cancel:
+            return as_text('login', await login.cancel())
+        if login.started is not None:
+            result = await login.status()
+            if result.get('status') != 'expired':
+                return as_text('login', result)
+        elif not replace_existing_session:
+            current = await login.status()
+            if current.get('status') not in ('login_required',):
+                return as_text('login', current)
         result = await login.start(replace_existing_session)
         image_path = result.pop('qr_image', None)
-        content: list[TextContent | ImageContent] = [TextContent(type='text', text=as_text('start_login', result))]
+        content: list[TextContent | ImageContent] = [TextContent(type='text', text=as_text('login', result))]
         if image_path:
             try:
                 image = Path(image_path).read_bytes()
             except OSError:
                 await login.cancel()
-                return [TextContent(type='text', text=as_text('start_login', {'status': 'error', 'note': 'QR image unavailable; login cancelled.'}))]
+                return [TextContent(type='text', text=as_text('login', {'status': 'error', 'note': 'QR image unavailable; login cancelled.'}))]
             content.append(ImageContent(type='image', data=base64.b64encode(image).decode('ascii'), mimeType='image/png'))
         return content
-
-    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['get_login_status'])
-    @guard
-    async def get_login_status() -> str:
-        """Check the QR login: pending, signed in, expired or failed. Saves the session once Lavka confirms it. Never returns credentials."""
-        return as_text('get_login_status', await login.status())
-
-    @mcp.tool(structured_output=False, annotations=ANNOTATIONS['cancel_login'])
-    async def cancel_login() -> str:
-        """Stop a pending QR login and delete its QR image. Does not sign out an existing session."""
-        return as_text('cancel_login', await login.cancel())
 
     return login

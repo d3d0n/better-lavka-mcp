@@ -167,5 +167,5 @@ async def test_registered_tools_are_discoverable(tmp_path):
     server = FastMCP('test')
     login = register_qr_tools(server, tmp_path / 'session')
     names = {tool.name for tool in await server.list_tools()}
-    assert {'start_login', 'get_login_status', 'cancel_login'} <= names
+    assert 'login' in names and not names & {'start_login', 'get_login_status', 'cancel_login'}
     assert login.account_changed is not None  # another account drops the remembered address and card

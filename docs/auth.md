@@ -4,12 +4,12 @@ Authenticated cart, account and order operations require a valid Yandex Passport
 
 ## QR login
 
-1. In a trusted private MCP client, explicitly call `start_login`. It returns a QR image and a link for the same pending login.
+1. In a trusted private MCP client, explicitly call `login`. Without a session it returns a QR image and a link for the same pending login.
 2. Scan using the Yandex app or open the link on your phone and approve the sign-in.
-3. Poll `get_login_status` until the flow finishes. The session is saved only after the server verifies it with Lavka. Use `cancel_login` to stop a pending flow.
-4. Replacing an existing session requires explicit approval and `start_login(replace_existing_session=true)`.
+3. Call `login` again until the flow finishes; while a login is pending it checks the scan instead of making a new QR. The session is saved only after the server verifies it with Lavka. `login(cancel=true)` stops a pending flow.
+4. With a session already saved, `login` just says so; replacing it requires explicit approval and `login(replace_existing_session=true)`.
 
-`cancel_login` works even after selecting RU or KZ; switching regions does not automatically cancel a pending QR. Its local expiry is checked when login is started or polled, not by a background timer. Cancel before stopping or restarting the server: pending login state is process-local, and a restart does not recover it or guarantee deletion of leftover QR or staged-session files. Remove any such credential files privately if needed; the upstream link may remain valid until it expires.
+The pending login's local expiry is checked when login is started or polled, not by a background timer. Cancel before stopping or restarting the server: pending login state is process-local, and a restart does not recover it or guarantee deletion of leftover QR or staged-session files. Remove any such credential files privately if needed; the upstream link may remain valid until it expires.
 
 **The QR image, link and session file are credentials.** Anyone with access while valid may be able to authenticate. Send them only to the intended account holder over a private channel. Client logs, transcripts, screenshots and image caches can retain them even though the server suppresses HTTP request logging. Do not post them in issues or commit them. Store session and state files in a trusted owner-only directory and restrict file access. Sharing a machine or client can expose the account; use a separate authorized session for another user.
 

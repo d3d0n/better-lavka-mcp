@@ -105,3 +105,23 @@ async def tracking_state(http, props, order_ids):
         return {order['order_id']: order for order in project_tracking_response(data)['orders']}
     except TrackingShapeError:
         raise UpstreamError('Unexpected tracking response') from None
+
+
+async def tracked_orders(http, props):
+    """Every order Lavka's tracking feed still holds (recent ones, closed included), keyed by order id."""
+    if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
+        raise UpstreamError('An authenticated Uzbekistan session is required')
+    try:
+        response = await http.get(BASE + '/api/v1/providers/orders-tracking/v1/tracked-orders', headers=api_headers(props))
+    except Exception:
+        raise UpstreamError('Tracking feed request failed') from None
+    if response.status_code != 200:
+        raise UpstreamError(f'Tracking feed HTTP {response.status_code}')
+    try:
+        data = response.json()
+    except ValueError:
+        raise UpstreamError('Tracking feed returned non-JSON') from None
+    try:
+        return {order['order_id']: order for order in project_tracking_response(data)['orders']}
+    except TrackingShapeError:
+        raise UpstreamError('Unexpected tracking feed') from None

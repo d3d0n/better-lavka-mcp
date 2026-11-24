@@ -4,6 +4,16 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-24
+
+### Changed
+- 26 tools became 19, so the model reads less and picks the right one more often. Tool names changed:
+  - `get_account` replaces `list_saved_addresses`, `list_saved_cards` and `count_saved_addresses`: sign-in, saved addresses with the chosen one marked, cards with the remembered one marked.
+  - `login` replaces `start_login`, `get_login_status` and `cancel_login`: it starts a QR login, checks a pending one on the next call, and takes `replace_existing_session` and `cancel`.
+  - `get_order` now includes the payment status and 3-D Secure link (`get_payment_status` is gone).
+  - `list_order_history` now shows the live tracking of orders Lavka still follows (`list_active_orders` is gone).
+  - `select_country` is gone: the country comes from `YANDEX_LAVKA_REGION`, and `get_storefront_status` and `search_products` take a `country` argument for one call.
+
 ## [0.13.0] — 2026-11-24
 
 ### Fixed
@@ -234,7 +244,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...v0.12.0
