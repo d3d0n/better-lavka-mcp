@@ -39,6 +39,17 @@ def _order_question(data):
             f"{_delivery_terms(data['position'])}.\n{items}")
 
 
+async def _accept_price_changes(http, saved_address_index):
+    from better_lavka_mcp.client import clean_text
+    from better_lavka_mcp.tools.cart import _cart_client
+    _, entries = await orders.addresses(http)
+    location = entries[saved_address_index]['address'].get('location') if 0 <= saved_address_index < len(entries) else None
+    if not isinstance(location, list):
+        return []
+    _, cart_client = await _cart_client(http, list(location))
+    return [{**change, 'title': clean_text(change['title'])} for change in await cart_client.accept_price_changes()]
+
+
 @tool()
 @uz_only
 async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
@@ -73,7 +84,16 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
                     card_last4 = cards[0]
                 else:
                     return {'preview': False, 'cards': ['**** ' + c for c in cards], 'note': 'Ask which card to use and pass card_last4; it is remembered for next time.'}
-        result = await orders.preview(http, saved_address_index, card_last4, expected_address_id)
+        try:
+            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id)
+        except orders.CartNotReady:
+            # Lavka repriced items since they were added: re-save them at the current price, as its site does.
+            # The new prices end up in the preview total, which the user approves anyway.
+            changes = await _accept_price_changes(http, saved_address_index)
+            if not changes:
+                raise
+            result = await orders.preview(http, saved_address_index, card_last4, expected_address_id)
+            result['price_changes'] = changes
     if chosen_card is not None:
         preferences.update(card_last4=chosen_card)
     return result

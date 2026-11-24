@@ -28,6 +28,10 @@ WARNING = ('Client-side preflight only: server-side total enforcement and idempo
            'Other clients do not share this guard. Refund status after cancellation is unknown.')
 
 
+class CartNotReady(ValueError):
+    """The cart is empty, unavailable for checkout or has no exact total."""
+
+
 def _ensure_default_state_dir(path):
     directory = paths.data_dir()
     if Path(path).parent != directory:
@@ -105,7 +109,7 @@ async def snapshot(http, address_index, suffix, expected_address_id=None):
         raise ValueError('Card suffix is missing or ambiguous')
     card = cards.select(indexes[0])
     if cart.get('availableForCheckout') is not True or not cart.get('items') or not isinstance(cart.get('totalPriceValue'), str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?', cart['totalPriceValue']):
-        raise ValueError('Nonempty available cart and exact total required')
+        raise CartNotReady('Nonempty available cart and exact total required')
     if cart.get('statuses', {}).get('isRover') is not False:
         raise ValueError('Non-rover delivery is not confirmed')
     if cart.get('timeslot') is not None:

@@ -4,6 +4,12 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-11-24
+
+### Fixed
+- A cart Lavka repriced after items were added ("price-mismatch") no longer blocks `preview_order`: it re-saves the repriced lines at the current price, as the Lavka site does, and the preview lists each change ("Каймак 23 490 сум → 24 990 сум"). `get_cart` shows current prices and the same list instead of "Can't order yet".
+- Cart writes send Lavka's current price for a repriced line instead of the stale one, which kept the cart blocked.
+
 ## [0.8.0] — 2026-11-24
 
 ### Added
@@ -161,7 +167,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...v0.7.2

@@ -26,12 +26,14 @@ async def _cart_client(http, location, props=None):
 
 
 def _cart_view(cart):
+    from better_lavka_mcp.cart import actual_prices, price_changes
     items = []
+    current = actual_prices(cart)  # a repriced line still carries its old price until it is re-saved
     for item in cart['items']:
         if not isinstance(item, dict):
             raise UpstreamError('Unexpected cart item')
         items.append({'id': item.get('id'), 'title': clean_text(item.get('title')), 'quantity': item.get('quantity'),
-                      'price_uzs': item.get('price'), 'pack': item.get('amount'),
+                      'price_uzs': current.get(item.get('id'), item.get('price')), 'pack': item.get('amount'),
                       'available': item.get('isUnavailableOnDepot') is not True})
     conditions = cart.get('orderConditions') if isinstance(cart.get('orderConditions'), dict) else {}
     return {'items': items, 'currency': 'UZS',
@@ -39,7 +41,8 @@ def _cart_view(cart):
             'delivery_uzs': conditions.get('deliveryCost'),
             'eta': conditions.get('eta'),
             'available_for_checkout': cart.get('availableForCheckout'),
-            'checkout_unavailable_reason': cart.get('checkoutUnavailableReason')}
+            'checkout_unavailable_reason': cart.get('checkoutUnavailableReason'),
+            'price_changes': [{**change, 'title': clean_text(change['title'])} for change in price_changes(cart)]}
 
 
 def _quantity(value):

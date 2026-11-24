@@ -68,6 +68,8 @@ def _cart_lines(cart):
     lines.append(total)
     if cart.get('available_for_checkout'):
         lines.append('Ready to order: preview_order shows address, card and the final total.')
+    elif cart.get('checkout_unavailable_reason') == 'price-mismatch' and cart.get('price_changes'):
+        lines.append(_price_changes(cart['price_changes'], accepted=False))
     else:
         lines.append(f"Can't order yet ({text(cart.get('checkout_unavailable_reason'), 60) or 'unknown reason'}): "
                      'remove items marked not available, or add more if the order is below the minimum.')
@@ -252,6 +254,13 @@ def _tracking(t):
     return f"Lavka says: {quoted(said, 300) or '(no text)'}" + (f" ({text(outcome, 40)})" if outcome else '') + '.'
 
 
+def _price_changes(changes, accepted):
+    listed = '; '.join(f"{text(c.get('title'))} {money(c.get('old_uzs'))} → {money(c.get('new_uzs'))}" for c in changes)
+    if accepted:
+        return f"**Prices changed since these were added:** {listed}. The total below uses the new prices."
+    return f"**Prices changed since these were added:** {listed}. preview_order accepts the new prices; tell the user."
+
+
 def _delivery_terms(a):
     """Everything the order sends about the address, so the user approves all of it."""
     where = ', '.join(text(a[k], 80) for k in ('city', 'street', 'house', 'buildingName') if a.get(k))
@@ -273,6 +282,8 @@ def _preview(r):
             return 'No saved card can pay for this order. The user adds or enables a card in the Lavka app, then call preview_order again.'
         return 'Which card? Saved: ' + ', '.join(r['cards']) + '. Call preview_order(card_last4="1234"); it is remembered.'
     lines = [f"**Order preview** — nothing is charged yet. {_delivery_terms(r['address'])}. Card {r['card']}."]
+    if r.get('price_changes'):
+        lines.append(_price_changes(r['price_changes'], accepted=True))
     for item in r['items']:
         lines.append(f"- {text(item.get('title'))} ×{item.get('quantity')} — {money(item.get('price'))}")
     lines.append(f"Total **{money(r['total_uzs'])}**.")

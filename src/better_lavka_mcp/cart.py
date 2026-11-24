@@ -25,6 +25,25 @@ def _write_lock():
     return lock
 
 
+def _diff_lines(cart):
+    lines = cart.get('diffDataProducts')
+    return [line for line in lines if isinstance(line, dict) and isinstance(line.get('id'), str)] if isinstance(lines, list) else []
+
+
+def actual_prices(cart):
+    """Lavka's current price per product for lines whose price changed after they were added."""
+    return {line['id']: str(line['price']) for line in _diff_lines(cart) if isinstance(line.get('price'), (int, str)) and str(line['price'])}
+
+
+def price_changes(cart):
+    """[{'id', 'title', 'old_uzs', 'new_uzs'}] for lines Lavka repriced since they were added."""
+    def amount(value):
+        digits = ''.join(ch for ch in str(value or '') if ch.isdigit())
+        return digits or None
+    return [{'id': line['id'], 'title': line.get('title'), 'old_uzs': amount(line.get('oldPriceWithSign')), 'new_uzs': amount(line.get('price'))}
+            for line in _diff_lines(cart)]
+
+
 class CartClient:
     _held = False  # True while this client holds the write lock inside transaction()
 
@@ -107,6 +126,29 @@ class CartClient:
             finally:
                 self._held = False
 
+    async def accept_price_changes(self):
+        """Re-save the lines whose price changed since they were added, at Lavka's current price.
+
+        This is what the Lavka site does on "price-mismatch". Returns the changes it accepted,
+        [{'id', 'title', 'old_uzs', 'new_uzs'}], or [] when nothing was pending.
+        """
+        async with contextlib.AsyncExitStack() as stack:
+            if not self._held:
+                await stack.enter_async_context(_write_lock())
+            cart = await self.retrieve()
+            changes = price_changes(cart)
+            if cart.get('checkoutUnavailableReason') != 'price-mismatch' or not changes:
+                return []
+            quantities = {}
+            for line in cart['diffDataProducts']:
+                if line.get('quantityType') != 'unit':
+                    raise UpstreamError('A weighed item changed price; accept it in the Lavka app')
+                quantities[line['id']] = Decimal(str(line.get('quantity')))
+            fresh, _ = await self._write(quantities, add=False)
+            if fresh.get('checkoutUnavailableReason') == 'price-mismatch':
+                raise UpstreamError('Lavka still reports changed prices after re-saving them')
+            return changes
+
     async def _locked_write(self, quantities, add, skip_fractional=False):
         if self._held:
             return await self._write(quantities, add, skip_fractional=skip_fractional)
@@ -143,6 +185,7 @@ class CartClient:
         if not written:
             return cart, outcomes
         prices = {item['id']: str(item.get('price') or '') for item in cart['items']}
+        prices.update(actual_prices(cart))  # a line written at a stale price keeps the cart in price-mismatch
         lines = [{'id': product_id, 'quantity': str(quantity), 'pricePerCount': '1', 'quantityType': 'unit',
                   'price': prices.get(product_id) or PLACEHOLDER_PRICE, 'title': '', 'currency': 'UZS'}
                  for product_id, quantity in written.items()]

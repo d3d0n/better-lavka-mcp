@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from better_lavka_mcp import app, client
+from better_lavka_mcp import app, client, render
 from better_lavka_mcp.orders import submit as orders
 from better_lavka_mcp.tools import account, cart, catalog
 from better_lavka_mcp.tools import orders as order_tools
@@ -44,16 +44,23 @@ class FakeLavka:
     def __init__(self):
         self.cart, self.version, self.updates = {}, 1, []
         self.orders = [ORDER]
+        self.stale = {}  # product id -> the old price its cart line still holds after Lavka repriced it
 
     def cart_body(self):
         items = []
         for pid, qty in self.cart.items():
             title, price, unavailable, limit = CATALOG[pid]
-            items.append({'id': pid, 'title': title, 'quantity': str(qty), 'price': str(price), 'amount': '1 шт',
+            items.append({'id': pid, 'title': title, 'quantity': str(qty), 'price': str(self.stale.get(pid, price)), 'amount': '1 шт',
                           'isUnavailableOnDepot': unavailable, 'quantityLimit': limit})
         total = sum(CATALOG[pid][1] * qty for pid, qty in self.cart.items())
-        return {'cartId': 'cart-1', 'cartVersion': self.version, 'items': items, 'totalPriceValue': str(total),
+        body = {'cartId': 'cart-1', 'cartVersion': self.version, 'items': items, 'totalPriceValue': str(total),
                 'availableForCheckout': bool(items), 'orderConditions': {'deliveryCost': '10', 'eta': '15 мин'}}
+        if self.stale:
+            # The live shape: the cart total is at the new prices, the lines still at the old ones.
+            body.update(availableForCheckout=False, checkoutUnavailableReason='price-mismatch', hidePriceMismatch=True, diffDataProducts=[
+                {'id': pid, 'quantityType': 'unit', 'quantity': self.cart[pid], 'price': CATALOG[pid][1],
+                 'oldPriceWithSign': f'{old:,} сум'.replace(',', ' '), 'title': CATALOG[pid][0]} for pid, old in self.stale.items()])
+        return body
 
     def handle(self, request):
         path = request.url.path
@@ -74,6 +81,8 @@ class FakeLavka:
             assert body['cartVersion'] == self.version and all(line['price'] for line in body['items'])
             self.updates.append({line['id']: int(line['quantity']) for line in body['items']})
             for line in body['items']:
+                if line['price'] == str(CATALOG[line['id']][1]):
+                    self.stale.pop(line['id'], None)  # re-saved at the current price
                 qty = int(line['quantity'])
                 if qty:
                     self.cart[line['id']] = qty
@@ -291,3 +300,28 @@ async def test_catalog_lists_categories_and_browses_shelves(lavka):
     assert [p['id'] for p in eggs['products']] == ['eggs'] and eggs['total'] == 1
     with pytest.raises(ValueError, match='list_categories'):
         await catalog.get_category_products('c-closed')
+
+
+@pytest.mark.asyncio
+async def test_preview_accepts_prices_lavka_changed_since_items_were_added(lavka, monkeypatch):
+    lavka.cart = {'kaymak': 1, 'eggs': 2}
+    lavka.stale = {'kaymak': 19990}
+    text = render.render('get_cart', await cart.get_cart())
+    assert 'Каймак ×1 — 21 990 сум each' in text  # the current price, not the stale line price
+    assert 'Prices changed since these were added:** Каймак 19 990 сум → 21 990 сум' in text and "Can't order yet" not in text
+    async def addresses(http):
+        return None, [{'addressId': 'a-home', 'address': {'location': HOME}}]
+    calls = []
+    async def preview(http, index, suffix, expected=None):
+        calls.append(dict(lavka.stale))
+        if lavka.stale:
+            raise orders.CartNotReady('Nonempty available cart and exact total required')
+        return {'preview_token': 't', 'total_uzs': lavka.cart_body()['totalPriceValue'], 'card': '**** ' + suffix, 'items': [],
+                'address': {'street': 'Example street', 'house': '1'}}
+    monkeypatch.setattr(orders, 'addresses', addresses)
+    monkeypatch.setattr(orders, 'preview', preview)
+    result = await order_tools.preview_order(card_last4='4242')
+    # Re-saved once, only the repriced line, at the current price; the other line was not touched.
+    assert lavka.updates == [{'kaymak': 1}] and calls == [{'kaymak': 19990}, {}]
+    assert result['price_changes'] == [{'id': 'kaymak', 'title': 'Каймак', 'old_uzs': '19990', 'new_uzs': '21990'}]
+    assert 'Prices changed since these were added:** Каймак 19 990 сум → 21 990 сум. The total below uses the new prices.' in render.render('preview_order', result)
