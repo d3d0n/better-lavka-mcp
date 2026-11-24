@@ -10,12 +10,20 @@
 </p>
 
 <p align="center">
-  <a href="docs/auth.md">Sign in</a> ·
-  <a href="docs/checkout.md">Checkout</a> ·
-  <a href="docs/clients.md">Clients</a> ·
-  <a href="SECURITY.md">Security</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a> ·
-  <a href="LICENSE">GPL-3.0</a>
+  <a href="https://pypi.org/project/better-lavka-mcp/"><img src="https://img.shields.io/pypi/v/better-lavka-mcp?color=1249D2" alt="PyPI"></a>
+  <a href="https://github.com/d3d0n/better-lavka-mcp/actions/workflows/ci.yml"><img src="https://github.com/d3d0n/better-lavka-mcp/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="https://registry.modelcontextprotocol.io/v0/servers?search=better-lavka-mcp"><img src="https://img.shields.io/badge/MCP_Registry-io.github.d3d0n%2Fbetter--lavka--mcp-1249D2" alt="MCP Registry"></a>
+  <img src="https://img.shields.io/pypi/pyversions/better-lavka-mcp" alt="Python">
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/auth.md">Sign in</a> ·
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/checkout.md">Checkout</a> ·
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/clients.md">Clients</a> ·
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/SECURITY.md">Security</a> ·
+  <a href="https://github.com/d3d0n/better-lavka-mcp/blob/main/CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
@@ -82,7 +90,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/). Add this
 
 Or with Claude Code: `claude mcp add lavka -- uvx better-lavka-mcp`.
 
-Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](docs/clients.md).
+Ask the assistant to call `start_login`, scan the QR in the Yandex app, and you're in. Per-client examples (Claude Code, Claude Desktop, OpenCode, Oh My Pi) are in [docs/clients.md](https://github.com/d3d0n/better-lavka-mcp/blob/main/docs/clients.md).
 
 **From source:**
 ```sh

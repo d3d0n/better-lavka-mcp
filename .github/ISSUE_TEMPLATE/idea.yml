@@ -1,0 +1,22 @@
+name: Idea
+description: Something you'd like to ask your assistant to do in Lavka
+labels: [enhancement]
+body:
+  - type: textarea
+    id: ask
+    attributes:
+      label: What would you say to the assistant?
+      placeholder: '"Order what I usually buy on Fridays"'
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Anything else
+      description: Links, screenshots of the Lavka app (redacted), similar features elsewhere.

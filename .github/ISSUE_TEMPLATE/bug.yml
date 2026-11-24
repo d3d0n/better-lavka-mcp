@@ -1,0 +1,43 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Never paste QR links, cookies, session files, addresses, phone numbers or order ids** — they give access to your account. Replace them with `<redacted>`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked the assistant, which tool it called, and what you got back.
+      placeholder: 'Asked "repeat my last order", repeat_order returned …'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: better-lavka-mcp version
+      description: From `uv pip show better-lavka-mcp`, or the release you installed.
+      placeholder: 0.5.3
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client and OS
+      placeholder: Claude Code 2.x on macOS 26
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Tool output (redacted)
+      description: Set BETTER_LAVKA_MCP_OUTPUT=json for the raw result if the text is unclear.
+      render: text
