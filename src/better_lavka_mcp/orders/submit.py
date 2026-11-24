@@ -221,6 +221,33 @@ async def preview(http, address_index, card_suffix, expected_address_id=None):
             'card':'**** '+card_suffix, 'delivery':'non-rover', 'warning':WARNING}
 
 
+# Cart fields that change on every read without changing the order: per-call ETA stamps and the
+# one-time submit token. Everything else, the money and the address included, must match the preview.
+_VOLATILE = frozenset({'nextIdempotencyToken', 'minEtaTimestamp', 'maxEtaTimestamp'})
+
+
+def _terms(binding):
+    def strip(value):
+        if isinstance(value, dict):
+            return {k: strip(v) for k, v in value.items() if k not in _VOLATILE}
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+    return strip(binding)
+
+
+def _changed(old, new, path=''):
+    """Dotted names of the fields that differ (names only, never values), at most five."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        names = []
+        for key in sorted(set(old) | set(new), key=str):
+            names += _changed(old.get(key), new.get(key), f'{path}.{key}' if path else str(key))
+        return names[:5]
+    if isinstance(old, list) and isinstance(new, list) and len(old) == len(new):
+        return [name for i, (a, b) in enumerate(zip(old, new, strict=True)) for name in _changed(a, b, f'{path}[{i}]')][:5]
+    return [] if old == new else [path or 'checkout data']
+
+
 async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approve=None):
     """Send the one checkout request for a fresh, user-confirmed preview.
 
@@ -259,8 +286,8 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
             raise ValueError('Preview expired during preflight')
         if stored['session'] != _session(http):
             raise ValueError('Authenticated session changed during preflight')
-        if fresh != old:
-            raise ValueError('Checkout data changed; obtain and confirm a new preview')
+        if _terms(fresh) != _terms(old):
+            raise ValueError('Checkout data changed (' + ', '.join(_changed(_terms(old), _terms(fresh))) + '); obtain and confirm a new preview')
         cart, pos, card = fresh['cart'], fresh['position'], fresh['card']
         payload = build_provider_payload(cart_id=cart['cartId'], cart_version=cart['cartVersion'], flow_version=cart['orderFlowVersion'], position=pos, depot_type='regular', payment_type=card['type'], payment_id=card['id'], options={'useRover':False})
     except BaseException:
@@ -268,6 +295,9 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
         raise
     headers = {'Origin':BASE, 'Referer':BASE+'/', 'X-Requested-With':'XMLHttpRequest',
                'X-Csrf-Token':props.get('authProxyCsrfToken') or '', 'X-Csrf-Token-Bff':props.get('csrfToken') or ''}
+    # The Lavka site sends the cart's one-time token with every submit, so Lavka itself drops a duplicate.
+    if isinstance(cart.get('nextIdempotencyToken'), str) and cart['nextIdempotencyToken']:
+        headers['X-Idempotency-Token'] = cart['nextIdempotencyToken']
     try:
         response = await http.post(BASE+'/api/v1/providers/orders/v2/submit', headers=headers, json=payload)
     except Exception as exc:

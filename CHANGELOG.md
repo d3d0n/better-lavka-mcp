@@ -4,6 +4,12 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-11-24
+
+### Fixed
+- `submit_order` no longer refuses every live order as "Checkout data changed": the check before sending ignores the delivery-time stamps and one-time token that Lavka changes on every cart read; the money, items, address and card still must match the preview. When something real changed, the error names the changed fields.
+- The order is sent with the cart's one-time `X-Idempotency-Token`, as the Lavka site does, so Lavka itself drops a duplicate.
+
 ## [0.7.2] — 2026-11-24
 
 ### Changed
@@ -140,7 +146,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.4...v0.7.0

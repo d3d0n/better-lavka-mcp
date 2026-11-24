@@ -231,6 +231,42 @@ async def test_success_allows_fresh_preview(tmp_path, monkeypatch):
         assert (await orders.preview(http, 0, "1234"))["preview_token"]
 
 
+@pytest.mark.asyncio
+async def test_fields_lavka_changes_on_every_read_do_not_block_the_order(tmp_path, monkeypatch):
+    # Live carts carry per-call ETA stamps and a fresh one-time submit token on every read.
+    monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
+    monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
+    reads = iter(range(1, 10))
+    def cart(total="10"):
+        n = next(reads)
+        return {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": total, "items": [{"id": "x"}],
+                "nextIdempotencyToken": f"token-{n}",
+                "deliveryConditions": [{"templateVars": {"minEtaTimestamp": f"12:{n:02}", "maxEtaTimestamp": f"13:{n:02}"}}]}
+    totals = iter(["10", "10", "10", "11"])
+    async def snap(*args):
+        return {"cart": cart(next(totals)), "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"},
+                "index": 0, "suffix": "1234"}, {}
+    monkeypatch.setattr(orders, "snapshot", snap)
+    posts = []
+    def handle(request):
+        if request.url.path.endswith("payments/v1/status"):
+            return httpx.Response(200, json={"status": "success"})
+        posts.append(request.headers.get("X-Idempotency-Token"))
+        return httpx.Response(200, json={"orderId": "one"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        http.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
+        p = await orders.preview(http, 0, "1234")
+        result = await orders.submit(http, p["preview_token"], "10", True)
+        assert result["outcome"] == "submitted"
+        # The token of the cart read right before sending, as the Lavka site does.
+        assert posts == ["token-2"]
+        # A real change still stops the order.
+        p = await orders.preview(http, 0, "1234")
+        with pytest.raises(ValueError, match="changed"):
+            await orders.submit(http, p["preview_token"], "10", True)
+        assert len(posts) == 1
+
+
 async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
     """submit_order over a real MCP session whose client answers the confirmation dialog with `answer`."""
     from mcp.shared.memory import create_connected_server_and_client_session
