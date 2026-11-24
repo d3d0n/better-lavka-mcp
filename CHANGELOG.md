@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-24
+
+### Fixed
+- Larger orders placed through the server are no longer canceled by Lavka right after payment starts. Requests now carry the client hints Chrome sends with our user agent (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`, `Accept-Language`), from which Yandex issues its `bh` browser cookie; without them the session looked like a client with no browser at all. Verified live: a 220 560 сум order that had been canceled within seconds went through with browser cookies and these headers.
+
 ## [0.12.1] — 2026-11-24
 
 ### Fixed
@@ -229,7 +234,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...v0.11.1

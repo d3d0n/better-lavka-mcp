@@ -14,7 +14,7 @@ from better_lavka_mcp import paths
 from better_lavka_mcp.auth import qr as qr_auth
 from better_lavka_mcp.constants import BASE, PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
-from better_lavka_mcp.headers import USER_AGENT, api_headers
+from better_lavka_mcp.headers import CLIENT_HINTS, USER_AGENT, api_headers
 from better_lavka_mcp.paths import session_file
 
 STATE = session_file()
@@ -132,7 +132,7 @@ class Lavka:
             if self.region_http is not None:
                 anon = await Lavka(self.region_http).bootstrap()
             else:
-                async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json"}) as anonymous_http:
+                async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json", **CLIENT_HINTS}) as anonymous_http:
                     anon = await Lavka(anonymous_http).bootstrap()
             info = anon.get('pageData', {}).get('serviceInfo')
             source = 'independent_anonymous_uz_homepage'
@@ -334,7 +334,7 @@ class _SessionClient(httpx.AsyncClient):
 
 
 def create_http():
-    client = _SessionClient(timeout=25, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    client = _SessionClient(timeout=25, follow_redirects=False, headers={"User-Agent": USER_AGENT, "Accept": "application/json", **CLIENT_HINTS})
     path = Path(STATE).expanduser()
     # Refuse a shared or symlinked data directory; a custom YANDEX_SESSION_FILE keeps its own folder.
     paths.prepare_parent(path, create=False)
