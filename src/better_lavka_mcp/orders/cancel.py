@@ -3,8 +3,8 @@ import hashlib
 import os
 import re
 import sqlite3
-import stat
 
+from better_lavka_mcp import paths
 from better_lavka_mcp.constants import BASE
 
 
@@ -32,7 +32,7 @@ async def cancel_order(*, http, props, order_id, confirmed, state_path, history)
     fd = os.open(state_path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        if not paths.private_file(info):
             raise CancellationBlocked('Cancellation state must be private and owner-only')
     finally:
         os.close(fd)

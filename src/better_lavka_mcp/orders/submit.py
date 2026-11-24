@@ -5,7 +5,6 @@ import os
 import re
 import secrets
 import sqlite3
-import stat
 import time
 from pathlib import Path
 
@@ -34,7 +33,7 @@ def _ensure_default_state_dir(path):
         return
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+    if not paths.private_dir(info):
         raise ValueError('State directory must be a private owner-only directory')
 
 
@@ -44,7 +43,7 @@ def _db():
     fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        if not paths.private_file(info):
             raise ValueError('Preview state must be private and owner-only')
     finally:
         os.close(fd)

@@ -50,7 +50,14 @@ def _quantity(value):
 
 
 async def _add_products(cart_client, wanted, titles):
-    """Add quantities on top of the cart, then drop what the store cannot sell and cap at its limits."""
+    """Add quantities on top of the cart, then drop what the store cannot sell and cap at its limits.
+
+    Both writes run under one cart lock so another call can't change the cart in between."""
+    async with cart_client.transaction():
+        return await _add_and_correct(cart_client, wanted, titles)
+
+
+async def _add_and_correct(cart_client, wanted, titles):
     fresh = await cart_client.set_items({pid: min(qty, 50) for pid, qty in wanted.items()}, add=True)
     by_id = {item.get('id'): item for item in fresh['items'] if isinstance(item, dict)}
     targets = {pid: _quantity(by_id.get(pid, {}).get('quantity')) for pid in wanted}

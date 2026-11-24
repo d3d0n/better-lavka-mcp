@@ -83,6 +83,35 @@ async def test_concurrent_adds_do_not_overwrite_each_other():
 
 
 @pytest.mark.asyncio
+async def test_removal_during_add_and_cap_is_not_undone():
+    import asyncio
+
+    from better_lavka_mcp.cart import CartClient
+    from better_lavka_mcp.tools.cart import _add_products
+    cart = {'version': 1, 'milk': 3}
+    first_update = asyncio.Event()
+    async def handle(request):
+        await asyncio.sleep(0)
+        if request.url.path.endswith('/update'):
+            body = json.loads(request.content)
+            assert body['cartVersion'] == cart['version']
+            cart['milk'], cart['version'] = int(body['items'][0]['quantity']), cart['version'] + 1
+            first_update.set()
+            return httpx.Response(200, json={})
+        items = [{'id': 'milk', 'quantity': str(cart['milk']), 'price': '100', 'quantityLimit': '3'}] if cart['milk'] else []
+        return httpx.Response(200, json={'cartId': 'cart', 'cartVersion': cart['version'], 'items': items})
+    props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        adder, remover = CartClient(http, props, [65.0, 40.0], 'сум'), CartClient(http, props, [65.0, 40.0], 'сум')
+        async def remove_after_first_write():
+            await first_update.wait()  # the add is written; its cap step has not run yet
+            await remover.set_items({'milk': 0})
+        # Adding 1 to 3 hits the limit of 3 and gets capped; the removal must land after that, not in between.
+        await asyncio.gather(_add_products(adder, {'milk': 1}, {}), remove_after_first_write())
+    assert cart['milk'] == 0
+
+
+@pytest.mark.asyncio
 async def test_unverified_readback_fails_closed():
     from better_lavka_mcp.cart import CartClient
     from better_lavka_mcp.errors import UpstreamError

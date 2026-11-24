@@ -1,5 +1,6 @@
 """Uzbekistan cart access: read the cart and set absolute item quantities."""
 import asyncio
+import contextlib
 import uuid
 import weakref
 from decimal import Decimal, InvalidOperation
@@ -24,6 +25,8 @@ def _write_lock():
 
 
 class CartClient:
+    _held = False  # True while this client holds the write lock inside transaction()
+
     def __init__(self, http, props, location, currency_sign):
         if props.get('pageData', {}).get('passportInfo', {}).get('status') != 'VALID':
             raise UpstreamError('An authenticated Uzbekistan session is required')
@@ -74,8 +77,20 @@ class CartClient:
         for product_id, quantity in quantities.items():
             if not isinstance(product_id, str) or not product_id or isinstance(quantity, bool) or not isinstance(quantity, int) or not lowest <= quantity <= 50:
                 raise ValueError(f'Each product needs an id and a quantity between {lowest} and 50')
+        if self._held:
+            return await self._write(quantities, add)
         async with _write_lock():
             return await self._write(quantities, add)
+
+    @contextlib.asynccontextmanager
+    async def transaction(self):
+        """Hold the cart write lock across several set_items calls, e.g. add and then cap at store limits."""
+        async with _write_lock():
+            self._held = True
+            try:
+                yield self
+            finally:
+                self._held = False
 
     async def _write(self, quantities, add):
         def counts(items):
