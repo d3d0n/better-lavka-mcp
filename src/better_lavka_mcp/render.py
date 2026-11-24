@@ -290,7 +290,24 @@ def _tracking(t):
         return "Tracking: unknown (Lavka didn't answer)."
     said = ' — '.join(x for x in (t.get('title'), t.get('subtitle')) if x)
     outcome = '/'.join(x for x in (t.get('status'), t.get('resolution')) if x)
-    return f"Lavka says: {quoted(said, 300) or '(no text)'}" + (f" ({text(outcome, 40)})" if outcome else '') + '.'
+    line = f"Lavka says: {quoted(said, 300) or '(no text)'}" + (f" ({text(outcome, 40)})" if outcome else '') + '.'
+    facts = []
+    if t.get('eta_minutes') is not None and t.get('resolution') is None and t.get('status') != 'closed':
+        facts.append(f"about {t['eta_minutes']} min to go")
+    courier = t.get('courier') or {}
+    if courier.get('distance_m') is not None:
+        km = courier['distance_m'] / 1000
+        facts.append(f"courier{' on ' + text(courier['transport'], 20) if courier.get('transport') else ''} "
+                     + (f"{km:.1f} km away" if km >= 1 else f"{courier['distance_m']} m away"))
+    if t.get('heavy') and t.get('status') != 'closed':
+        facts.append('heavy order')
+    if t.get('number'):
+        facts.append(f"order № {text(t['number'], 30)}")
+    if t.get('resolution') == 'canceled' and t.get('price_uzs') == '0' and t.get('original_price_uzs'):
+        facts.append(f"charged 0 of {money(t['original_price_uzs'])}")
+    if facts:
+        line += ' ' + '; '.join(facts).capitalize() + '.'
+    return line
 
 
 def _price_changes(changes, accepted):
@@ -369,7 +386,8 @@ def _active(r):
         return 'Lavka is tracking no orders. A just-placed order can take a moment to show up; list_order_history has the full list.'
     lines = ['Orders Lavka is tracking:']
     for o in r['orders']:
-        lines.append(f"- {ref(o['order_id'])}: {_tracking(o)}" + (' Can still be canceled.' if o.get('cancelable') else ''))
+        can = [label for key, label in (('cancelable', 'canceled'), ('can_edit_address', 'given another address')) if o.get(key)]
+        lines.append(f"- {ref(o['order_id'])}: {_tracking(o)}" + (f" Can still be {' or '.join(can)}." if can else ''))
     return '\n'.join(lines)
 
 

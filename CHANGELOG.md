@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-24
+
+### Added
+- Order tracking (`list_active_orders`, `get_order`) shows how many minutes are left, the order number support asks for, whether the address can still be changed, Lavka's "heavy order" flag and, for canceled orders, what was finally charged ("charged 0 of 220 560 сум"). Once Lavka shares the courier's position, it shows the transport and the distance to the door; courier names, phones and routes are left out.
+
 ## [0.11.1] — 2026-11-24
 
 ### Fixed
@@ -218,7 +223,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...v0.10.2
