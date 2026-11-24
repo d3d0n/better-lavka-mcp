@@ -249,7 +249,8 @@ async def test_fields_lavka_changes_on_every_read_do_not_block_the_order(tmp_pat
     reads = iter(range(1, 10))
     def cart(total="10"):
         n = next(reads)
-        return {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": total, "items": [{"id": "x"}],
+        return {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": total,
+                "items": [{"id": "x", "quantity": "1", "maxAmount": str(20 - n), "quantityLimit": str(20 - n)}],
                 "nextIdempotencyToken": f"token-{n}",
                 "deliveryConditions": [{"templateVars": {"minEtaTimestamp": f"12:{n:02}", "maxEtaTimestamp": f"13:{n:02}"}}]}
     totals = iter(["10", "10", "10", "11"])

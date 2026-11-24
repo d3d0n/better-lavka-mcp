@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.10.2] — 2026-11-24
+
+### Fixed
+- The check before sending an order ignores each item's live stock limit (`maxAmount`, `quantityLimit`), which moved between preview and submit on a live order. Items, quantities, prices, availability, total, address and card still must match the preview.
+
 ## [0.10.1] — 2026-11-24
 
 ### Fixed
@@ -199,7 +204,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...v0.9.0

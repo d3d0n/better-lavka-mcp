@@ -227,9 +227,11 @@ async def preview(http, address_index, card_suffix, expected_address_id=None):
             'card':'**** '+card_suffix, 'delivery':'non-rover', 'warning':WARNING}
 
 
-# Cart fields that change on every read without changing the order: per-call ETA stamps and the
-# one-time submit token. Everything else, the money and the address included, must match the preview.
-_VOLATILE = frozenset({'nextIdempotencyToken', 'minEtaTimestamp', 'maxEtaTimestamp'})
+# Cart fields that change on every read without changing the order: per-call ETA stamps, the
+# one-time submit token and the live stock limit per item (seen live moving between preview and
+# submit). Items, quantities, prices, availability, total, address and card must match the preview;
+# a stock limit below the ordered quantity shows up in those.
+_VOLATILE = frozenset({'nextIdempotencyToken', 'minEtaTimestamp', 'maxEtaTimestamp', 'maxAmount', 'quantityLimit'})
 
 
 def _terms(binding):
