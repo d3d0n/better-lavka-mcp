@@ -41,7 +41,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         if path.endswith('retrieve'): return httpx.Response(200,json=cart)
         if path.endswith('methods'): return httpx.Response(200,json={'methods':[{'type':'card','id':'private','number':'**** 1234','availability':{'available':True}}]})
         if path.endswith('submit'):
-            body=json.loads(request.content); assert body['position']['flat']=='5'; assert body['useRover'] is False; assert body['paymentMethodId']=='private'
+            body=json.loads(request.content); assert body['position']['flat']=='5'; assert body['use_rover'] is False; assert body['payment_method_id']=='private'
             return httpx.Response(200,json={'orderId':'o1','newbie':False,'trackPayment':{'modalPlace':'none'}})
         if path.endswith('cancel'): return httpx.Response(200,json={})
         if path.endswith('payments/v1/status'):
@@ -64,7 +64,7 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         async def history(): return {'orders':[{'order_id':'o1','status':'cancelled'}]}
         result=await orders.cancel(http,'o1',True,history)
         assert result['refund_status']=='unknown'
-    assert calls.count('/api/v1/providers/orders/v2/submit')==1
+    assert calls.count('/api/v2/lavka/v1/orders/v2/submit')==1
     assert calls.count('/api/v1/providers/orders/v1/cancel')==1
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_checkout_timeout_blocks_new_preview_across_instances(tmp_path, mo
         assert result['transport_error'] == 'ReadTimeout'
         assert 'secret-token' not in str(result) and 'private address' not in str(result)
         with pytest.raises(ValueError,match='quarantined'): await orders.preview(http,0,'1234')
-    assert writes==['/api/v1/providers/orders/v2/submit']
+    assert writes==['/api/v2/lavka/v1/orders/v2/submit']
 
 @pytest.mark.asyncio
 async def test_expiry_during_fresh_preflight_prevents_write(tmp_path, monkeypatch):
@@ -279,11 +279,12 @@ async def test_submit_request_matches_the_lavka_site(tmp_path, monkeypatch):
     binding = {"cart": cart, "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
     async def snap(*args): return binding, {"authProxyCsrfToken": "a", "csrfToken": "b", "pageEnv": {"cityId": 10335, "locale": {"lang": "ru", "region": "UZ"}}}
     monkeypatch.setattr(orders, "snapshot", snap)
-    sent = []
+    sent, sent_paths = [], []
     def handle(request):
         if request.url.path.endswith("payments/v1/status"):
             return httpx.Response(200, json={"status": "success"})
         sent.append((request.headers, json.loads(request.content)))
+        sent_paths.append(request.url.path)
         return httpx.Response(200, json={"orderId": "one", "trackPayment": {"modalPlace": "none"}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         http.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
@@ -292,9 +293,12 @@ async def test_submit_request_matches_the_lavka_site(tmp_path, monkeypatch):
     headers, body = sent[0]
     assert headers["X-Idempotency-Token"] == "once" and headers["X-Csrf-Token"] == "a"
     assert headers["X-Lavka-Web-City"] == "10335" and headers["X-Lavka-Web-Locale"] == "ru-UZ"
-    assert body["depotOrderContext"] == {"position": [69.2, 41.3], "isSupermarket": False}
+    assert body["depot_order_context"] == {"position": [69.2, 41.3], "is_supermarket": False}
     # Earns cashback like the site does, never spends it.
-    assert body["cashback"] == {"walletId": "w/1"} and body["serviceFeeV2"] == "3990" and "serviceFee" not in body
+    assert body["cashback"] == {"wallet_id": "w/1"} and body["service_fee_v2"] == "3990" and "service_fee" not in body
+    # The site's own checkout path, body format and platform headers (captured from its "Оплатить" button).
+    assert sent_paths == ["/api/v2/lavka/v1/orders/v2/submit"] and headers["X-Platform"] == "lavka_uzb_web"
+    assert headers["X-Grocery-Trusted-User"] == "false" and headers["X-Captcha-Service"] == "lavka"
     assert result["lavka_response"] == {"fields": ["orderId", "trackPayment"], "track_payment": {"modalPlace": "none"}}
     # A local record of Lavka's answer and every payment poll, without ids, tokens or links.
     from better_lavka_mcp.orders import diagnostics
@@ -351,7 +355,7 @@ async def test_user_saying_no_in_the_client_dialog_sends_nothing(tmp_path, monke
 async def test_user_saying_yes_in_the_client_dialog_places_the_order(tmp_path, monkeypatch):
     from mcp.types import ElicitResult
     text, posts, _ = await _submit_through_mcp(tmp_path, monkeypatch, ElicitResult(action="accept", content={"approve": True}))
-    assert posts == ["/api/v1/providers/orders/v2/submit"] and 'Order placed' in text
+    assert posts == ["/api/v2/lavka/v1/orders/v2/submit"] and 'Order placed' in text
     # Accepting the dialog without ticking the box is not a yes.
     text, posts, _ = await _submit_through_mcp(tmp_path, monkeypatch, ElicitResult(action="accept", content={"approve": False}))
     assert posts == [] and 'said no' in text
@@ -360,7 +364,7 @@ async def test_user_saying_yes_in_the_client_dialog_places_the_order(tmp_path, m
 @pytest.mark.asyncio
 async def test_clients_without_dialogs_still_order_on_explicit_confirmation(tmp_path, monkeypatch):
     text, posts, questions = await _submit_through_mcp(tmp_path, monkeypatch, None, ask=False)
-    assert questions == [] and posts == ["/api/v1/providers/orders/v2/submit"] and 'Order placed' in text
+    assert questions == [] and posts == ["/api/v2/lavka/v1/orders/v2/submit"] and 'Order placed' in text
 
 
 @pytest.mark.asyncio

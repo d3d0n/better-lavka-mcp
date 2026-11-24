@@ -5,6 +5,7 @@ import httpx
 
 from better_lavka_mcp import client
 from better_lavka_mcp.app import _current_delivery, _location, selected_region, tool, uz_only
+from better_lavka_mcp.headers import USER_AGENT
 
 
 async def _cart_summary(http, delivery, props):
@@ -35,7 +36,7 @@ async def get_storefront_status(country: str | None = None) -> dict:
         raise ValueError('Supported countries: RU, KZ, UZ')
     if country != 'UZ':
         from better_lavka_mcp.region import RegionalStorefront
-        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).status()
     async with client.create_http() as http:
         lavka = client.Lavka(http)
@@ -69,7 +70,7 @@ async def search_products(query: str, limit: int = 20, longitude: float | None =
         if longitude is None:
             raise ValueError('Both longitude and latitude are required')
         from better_lavka_mcp.region import RegionalStorefront
-        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as http:
             return await RegionalStorefront(country, http).search(query, limit, longitude, latitude)
     async with client.create_http() as http:
         location = _location(http, longitude, latitude)

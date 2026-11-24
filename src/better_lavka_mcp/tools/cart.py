@@ -10,6 +10,7 @@ from better_lavka_mcp.app import _location, tool, uz_only
 from better_lavka_mcp.cart import CartClient
 from better_lavka_mcp.client import _number, clean_text
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import USER_AGENT
 
 
 async def _cart_client(http, location, props=None):
@@ -18,7 +19,7 @@ async def _cart_client(http, location, props=None):
     client_._require_login(props)
     info = props.get('pageData', {}).get('serviceInfo', {})
     if not info:
-        async with httpx.AsyncClient(timeout=25, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as anonymous:
+        async with httpx.AsyncClient(timeout=25, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as anonymous:
             info = (await client.Lavka(anonymous).bootstrap()).get('pageData', {}).get('serviceInfo', {})
     if info.get('currency') != 'UZS' or not info.get('currencySign'):
         raise UpstreamError('Uzbekistan currency and sign not confirmed by upstream')

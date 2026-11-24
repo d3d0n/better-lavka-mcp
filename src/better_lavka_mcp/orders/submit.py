@@ -267,6 +267,18 @@ def _site_options(cart):
     return options
 
 
+SUBMIT_PATH = '/api/v2/lavka/v1/orders/v2/submit'
+
+
+def _snake(value):
+    """camelCase keys to the snake_case the site's gateway takes (cartId -> cart_id), values untouched."""
+    if isinstance(value, dict):
+        return {re.sub(r'(?<!^)(?=[A-Z])', '_', str(key)).lower(): _snake(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_snake(item) for item in value]
+    return value
+
+
 async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approve=None):
     """Send the one checkout request for a fresh, user-confirmed preview.
 
@@ -317,7 +329,8 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
     if isinstance(cart.get('nextIdempotencyToken'), str) and cart['nextIdempotencyToken']:
         headers['X-Idempotency-Token'] = cart['nextIdempotencyToken']
     try:
-        response = await http.post(BASE+'/api/v1/providers/orders/v2/submit', headers=headers, json=payload)
+        # The site's own checkout path and body format (snake_case), captured from its "Оплатить" button.
+        response = await http.post(BASE+SUBMIT_PATH, headers=headers, json=_snake(payload))
     except Exception as exc:
         _finish(nonce, 'unknown', 'Transport failure; server reason unavailable')
         return {'outcome':'unknown', 'transport_error': type(exc).__name__, 'warning':WARNING + ' No server response was received; reconcile before a fresh attempt.'}
@@ -326,7 +339,9 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
     except ValueError:
         data = None
     result = {'outcome':'unknown', 'http_status':response.status_code, 'warning':WARNING}
-    if response.status_code == 200 and isinstance(data, dict) and isinstance(data.get('orderId'), str) and data['orderId']:
+    order_id = (data.get('orderId') or data.get('order_id')) if isinstance(data, dict) else None
+    if response.status_code == 200 and isinstance(data, dict) and isinstance(order_id, str) and order_id:
+        data = {**data, 'orderId': order_id}
         _finish(nonce, 'submitted', 'Order ID returned')
         result.update(outcome='submitted', order_id=data['orderId'])
         # Lavka's own answer, minus ids: which fields it sent and how the site should track payment.
@@ -344,7 +359,7 @@ async def submit(http, token, confirmed_total_uzs, explicit_confirmation, approv
                 result['tracking'] = {'state': 'unknown'}
         from better_lavka_mcp.orders import diagnostics
         saved = diagnostics.record({'order_id': data['orderId'], 'submit_response': diagnostics.redact(data),
-                                    'request_fields': sorted(payload), 'payment_trace': trace, 'tracking': result.get('tracking')})
+                                    'request_fields': sorted(_snake(payload)), 'payment_trace': trace, 'tracking': result.get('tracking')})
         if saved:
             result['diagnostics_file'] = saved
     elif 400 <= response.status_code <= 599:

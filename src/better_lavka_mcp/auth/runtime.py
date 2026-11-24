@@ -10,6 +10,7 @@ import httpx
 
 from better_lavka_mcp.auth import qr as qr_auth
 from better_lavka_mcp.errors import UpstreamError
+from better_lavka_mcp.headers import USER_AGENT
 
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
@@ -27,7 +28,7 @@ class QRManager:
         async with self.lock:
             if self.auth is not None:
                 raise UpstreamError('An active QR login already exists')
-            self.http = httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'})
+            self.http = httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'})
             try:
                 self.auth = qr_auth.PassportQR(self.http)
                 link = await self.auth.start()

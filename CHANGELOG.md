@@ -4,6 +4,12 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-24
+
+### Changed
+- `submit_order` now sends the order exactly as the Lavka site's "Оплатить" button does, captured from the site with the request stopped before it left the browser: the site's gateway (`/api/v2/lavka/v1/orders/v2/submit`) with its snake_case body, instead of the older `/api/v1/providers` route. Two live orders sent the old way were created, charged and then canceled by Lavka with a refund; the cause is not confirmed.
+- Every Uzbekistan request carries the site's platform headers (`X-Platform: lavka_uzb_web`, `X-Grocery-Trusted-User`, `X-Captcha-Service`, `X-Captcha-Language`) and a current desktop Chrome user agent instead of a bare `Mozilla/5.0`.
+
 ## [0.8.3] — 2026-11-24
 
 ### Fixed
@@ -177,7 +183,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.0...v0.8.1

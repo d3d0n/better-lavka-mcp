@@ -6,6 +6,7 @@ from pathlib import Path
 
 from better_lavka_mcp import paths
 from better_lavka_mcp.auth import qr as qr_auth
+from better_lavka_mcp.headers import USER_AGENT
 
 
 class QRLogin:
@@ -150,7 +151,7 @@ def register_qr_tools(mcp, session_path, guard=None):
 
     async def verify(path):
         from better_lavka_mcp.client import Lavka
-        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}) as http:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as http:
             data = json.loads(paths.read_private_bytes(path, 'Saved session file'))
             for item in data['cookies']:
                 params = dict(item)
