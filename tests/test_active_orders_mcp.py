@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from better_lavka_mcp import client
+from better_lavka_mcp.constants import PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.tools import account
 
@@ -15,7 +16,7 @@ async def test_list_active_orders_reads_authenticated_verified_empty_array(monke
         calls.append((request.method, request.url.path))
         if request.url.host == 'yandex.uz':
             return httpx.Response(200, headers={'set-cookie': 'yandexuid=anon; Domain=.yandex.uz; Path=/'})
-        if request.url.path == '/':
+        if request.url.path == PROPS_PAGE:
             props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         assert request.url.path == '/api/v1/providers/orders-tracking/v1/tracked-orders'
@@ -34,7 +35,7 @@ async def test_list_active_orders_rejects_unauthenticated_or_unverified_shapes(m
     def handle(request):
         if request.url.host == 'yandex.uz':
             return httpx.Response(200, headers={'set-cookie': 'yandexuid=anon; Domain=.yandex.uz; Path=/'})
-        if request.url.path == '/':
+        if request.url.path == PROPS_PAGE:
             props = {'pageData': {'passportInfo': {'status': status}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         return httpx.Response(200, json=data)
@@ -49,7 +50,7 @@ async def test_nonempty_tracking_feed_exposes_only_entry_count(monkeypatch):
     def handle(request):
         if request.url.host == 'yandex.uz':
             return httpx.Response(200, headers={'set-cookie': 'yandexuid=anon; Domain=.yandex.uz; Path=/'})
-        if request.url.path == '/':
+        if request.url.path == PROPS_PAGE:
             props = {'pageData': {'passportInfo': {'status': 'VALID'}}}
             return httpx.Response(200, text='<script id="__page_props__-data">' + json.dumps(props) + '</script>')
         return httpx.Response(200, json=[{'id': 'secret'}])

@@ -9,6 +9,7 @@ import math
 import re
 import time
 
+from better_lavka_mcp.constants import PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
 
 REGIONS = {
@@ -32,7 +33,7 @@ class RegionalStorefront:
         identity = await self.http.get(f'https://yandex.{self.domain}/favicon.ico', follow_redirects=True)
         if identity.status_code != 200 or not any(c.name == 'yandexuid' and c.domain in (f'.yandex.{self.domain}', f'yandex.{self.domain}') for c in self.http.cookies.jar):
             raise UpstreamError('Regional identity bootstrap failed')
-        response = await self.http.get(self.base + '/', params={'_lavka_mcp': str(time.time_ns())})
+        response = await self.http.get(self.base + PROPS_PAGE, params={'_lavka_mcp': str(time.time_ns())})
         if response.status_code != 200:
             raise UpstreamError(f'Regional homepage HTTP {response.status_code}')
         match = re.search(r'<script id="__page_props__-data"[^>]*>(.*?)</script>', response.text, re.S)

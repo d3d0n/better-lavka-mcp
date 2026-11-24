@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from better_lavka_mcp.constants import PROPS_PAGE
 from better_lavka_mcp.region import RegionalStorefront
 
 
@@ -18,4 +19,4 @@ async def test_regional_search_isolates_host_and_currency():
         result = await RegionalStorefront('KZ', http).search('молоко', 5, 76.945, 43.2389)
     assert result['country'] == 'KZ'
     assert result['products'][0]['currency'] == 'KZT'
-    assert calls == [('yandex.kz','/favicon.ico'), ('lavka.yandex.kz','/'), ('lavka.yandex.kz','/api/v1/providers/search/v3/lavka')]
+    assert calls == [('yandex.kz','/favicon.ico'), ('lavka.yandex.kz', PROPS_PAGE), ('lavka.yandex.kz','/api/v1/providers/search/v3/lavka')]

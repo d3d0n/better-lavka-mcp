@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-11-24
+
+### Changed
+- Every tool reads Lavka's session tokens and sign-in state from the `/cart` page instead of the homepage: the same data, rendered about four times faster, so each call is roughly 1–1.5 s quicker (Uzbekistan, Russia and Kazakhstan).
+
 ## [0.7.1] — 2026-11-24
 
 ### Fixed
@@ -135,7 +140,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.3...v0.6.4

@@ -11,7 +11,7 @@ import httpx
 
 from better_lavka_mcp import paths
 from better_lavka_mcp.auth import qr as qr_auth
-from better_lavka_mcp.constants import BASE
+from better_lavka_mcp.constants import BASE, PROPS_PAGE
 from better_lavka_mcp.errors import UpstreamError
 from better_lavka_mcp.paths import session_file
 
@@ -72,7 +72,8 @@ class Lavka:
             identity = await self.http.get("https://yandex.uz/favicon.ico", follow_redirects=True)
             if identity.status_code != 200 or not any(c.name == "yandexuid" and c.domain in (".yandex.uz", "yandex.uz") for c in self.http.cookies.jar):
                 raise UpstreamError("Uzbekistan identity bootstrap failed")
-        r = await self.http.get(BASE + "/", params={"_lavka_mcp": str(time.time_ns())})
+        # /cart carries the same page props as the homepage (tokens, sign-in, serviceInfo) and renders ~4x faster.
+        r = await self.http.get(BASE + PROPS_PAGE, params={"_lavka_mcp": str(time.time_ns())})
         if r.status_code != 200:
             raise UpstreamError(f"Homepage HTTP {r.status_code}")
         m = re.search(r'<script id="__page_props__-data"[^>]*>(.*?)</script>', r.text, re.S)
