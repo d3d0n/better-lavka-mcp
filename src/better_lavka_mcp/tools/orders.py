@@ -1,4 +1,6 @@
 """Checkout tools: preview, confirmed submit, reconciliation and cancellation."""
+import weakref
+
 from mcp.server.fastmcp import Context
 from mcp.types import ClientCapabilities, ElicitationCapability
 from pydantic import BaseModel, Field
@@ -50,10 +52,40 @@ async def _accept_price_changes(http, saved_address_index):
     return [{**change, 'title': clean_text(change['title'])} for change in await cart_client.accept_price_changes()]
 
 
+# The latest preview of each MCP session (one conversation). The model never sees or copies it:
+# submit_order places what this conversation previewed last, never another chat's preview.
+_PREVIEWS = weakref.WeakKeyDictionary()
+_NO_SESSION = object()  # direct calls without an MCP request (tests, scripts)
+_DIRECT_PREVIEW = {}
+
+
+def _conversation(ctx):
+    try:
+        return ctx.session if ctx is not None else _NO_SESSION
+    except (AttributeError, ValueError):  # no active request
+        return _NO_SESSION
+
+
+def _remember_preview(ctx, token):
+    key = _conversation(ctx)
+    if key is _NO_SESSION:
+        _DIRECT_PREVIEW['token'] = token
+    else:
+        _PREVIEWS[key] = token
+
+
+def _take_preview(ctx):
+    key = _conversation(ctx)
+    token = _DIRECT_PREVIEW.pop('token', None) if key is _NO_SESSION else _PREVIEWS.pop(key, None)
+    if token is None:
+        raise ValueError('No order preview in this conversation: call preview_order, show it to the user, then submit_order')
+    return token
+
+
 @tool()
 @uz_only
-async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None) -> dict:
-    """Show the order before paying: address, items, total UZS and card, plus a five-minute token for submit_order. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing; if Lavka repriced items since they were added, it re-saves them at the new price and lists the changes."""
+async def preview_order(saved_address_index: int | None = None, card_last4: str | None = None, ctx: Context | None = None) -> dict:
+    """Show the order before paying: address, items, total UZS and card; submit_order then places exactly this preview within five minutes. Defaults to the address chosen with use_address and to the card used last time (or your only card). Charges nothing; puts the card on the Lavka cart as its checkout page does, and if Lavka repriced items since they were added, re-saves them at the new price and lists the changes."""
     from better_lavka_mcp import preferences
     from better_lavka_mcp.payment import PaymentClient
     chosen_card = card_last4
@@ -96,16 +128,18 @@ async def preview_order(saved_address_index: int | None = None, card_last4: str 
             result['price_changes'] = changes
     if chosen_card is not None:
         preferences.update(card_last4=chosen_card)
+    _remember_preview(ctx, result.pop('preview_token'))
     return result
 
 
 @tool()
 @uz_only
-async def submit_order(order_preview_token: str, confirmed_total_uzs: str, explicit_confirmation: bool, ctx: Context | None = None) -> dict:
-    """Charges money: place the order from preview_order's token. Pass the exact total from the preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. If the client supports it, the user also confirms in a dialog. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure. A failed preflight spends the token: call preview_order again."""
+async def submit_order(confirmed_total_uzs: str, explicit_confirmation: bool, ctx: Context | None = None) -> dict:
+    """Charges money: place the order this conversation's preview_order showed. Pass the exact total from that preview as confirmed_total_uzs and explicit_confirmation=true once the user agreed. If the client supports it, the user also confirms in a dialog. Sent once; then waits briefly for the payment status and returns redirect_url if the bank asks for 3-D Secure. Any attempt uses up the preview: call preview_order again before another try."""
+    token = _take_preview(ctx)
     approve = (lambda data: _ask(ctx, _order_question(data))) if _can_ask(ctx) else None
     async with client.create_http() as http:
-        return await orders.submit(http, order_preview_token, confirmed_total_uzs, explicit_confirmation, approve)
+        return await orders.submit(http, token, confirmed_total_uzs, explicit_confirmation, approve)
 
 
 @tool()

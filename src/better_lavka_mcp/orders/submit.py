@@ -82,7 +82,7 @@ async def addresses(http):
     return client, data
 
 
-async def snapshot(http, address_index, suffix, expected_address_id=None):
+async def snapshot(http, address_index, suffix, expected_address_id=None, prepare=False):
     client, entries = await addresses(http)
     if type(address_index) is not int or not 0 <= address_index < len(entries) or not isinstance(suffix, str) or not re.fullmatch(r'[0-9]{4}', suffix):
         raise ValueError('Select an exact saved address index and four-digit card suffix')
@@ -102,12 +102,14 @@ async def snapshot(http, address_index, suffix, expected_address_id=None):
     info = response.json()
     if not isinstance(info, dict) or info.get('currency') != 'UZS' or not info.get('currencySign') or not info.get('depotId'):
         raise UpstreamError('Service-info location/currency is unverified')
-    cart = await CartClient(http, props, loc, info['currencySign']).retrieve()
+    cart_client = CartClient(http, props, loc, info['currencySign'])
     cards = await PaymentClient(http, props, loc).lookup()
     indexes = [i for i, mask in enumerate(cards.masked_cards) if mask == '**** ' + suffix]
     if len(indexes) != 1:
         raise ValueError('Card suffix is missing or ambiguous')
     card = cards.select(indexes[0])
+    # Only the preview prepares the cart; the check before submit must see it unchanged.
+    cart = await (cart_client.prepare_checkout(card) if prepare else cart_client.retrieve())
     if cart.get('availableForCheckout') is not True or not cart.get('items') or not isinstance(cart.get('totalPriceValue'), str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]{1,2})?', cart['totalPriceValue']):
         raise CartNotReady('Nonempty available cart and exact total required')
     if cart.get('statuses', {}).get('isRover') is not False:
@@ -212,7 +214,7 @@ def reconcile_checkout(*, history_checked, payment_checked, acknowledge_uncertai
 
 
 async def preview(http, address_index, card_suffix, expected_address_id=None):
-    binding, _ = await snapshot(http, address_index, card_suffix, expected_address_id)
+    binding, _ = await snapshot(http, address_index, card_suffix, expected_address_id, prepare=True)
     _check_guard()
     binding = {'data': binding, 'session': _session(http)}
     token = secrets.token_urlsafe(32)

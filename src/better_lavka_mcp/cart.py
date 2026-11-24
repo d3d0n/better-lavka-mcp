@@ -56,11 +56,16 @@ class CartClient:
             raise ValueError('Uzbekistan currency sign is required')
         self.http, self.props, self.location, self.currency_sign = http, props, list(location), currency_sign
 
+    # The site's own checkout-page calls; they take snake_case bodies and a one-time X-Idempotency-Token.
+    SITE_WRITES = ('/api/v2/lavka/v1/cart/v1/set-payment', '/api/v2/lavka/v1/cart/v1/set-cashback-flow')
+
     async def _post(self, path, body):
-        if path not in ('/api/v1/providers/cart/v1/retrieve', '/api/v1/providers/cart/v1/update'):
+        if path not in ('/api/v1/providers/cart/v1/retrieve', '/api/v1/providers/cart/v1/update', *self.SITE_WRITES):
             raise ValueError('Endpoint is not allowlisted')
         p = self.props
         headers = api_headers(p)
+        if path in self.SITE_WRITES:
+            headers['X-Idempotency-Token'] = uuid.uuid4().hex
         try:
             r = await self.http.post(BASE + path, headers=headers, json=body)
         except Exception:
@@ -81,6 +86,34 @@ class CartClient:
         if not isinstance(cart, dict) or not isinstance(cart.get('items'), list) or not cart.get('cartId') or cart.get('cartVersion') is None:
             raise UpstreamError('Unexpected cart response')
         return cart
+
+    async def prepare_checkout(self, card):
+        """Put the card and the cashback mode on the cart, as the site's checkout page does when it opens.
+
+        Seen live: a cart without a payment method was charged and then canceled by Lavka, while the
+        same request on a cart the site had prepared went through. Writes only what differs; returns the cart.
+        A cashback mode the user already chose (e.g. spending points) is left alone.
+        """
+        async with contextlib.AsyncExitStack() as stack:
+            if not self._held:
+                await stack.enter_async_context(_write_lock())
+            cart = await self.retrieve()
+            method = cart.get('paymentMethod') if isinstance(cart.get('paymentMethod'), dict) else {}
+            if (method.get('type'), method.get('id')) != (card.get('type'), card.get('id')):
+                await self._post(self.SITE_WRITES[0], self._site_body(cart, payment_method={'type': card['type'], 'id': card['id']}))
+                cart = await self.retrieve()
+                method = cart.get('paymentMethod') if isinstance(cart.get('paymentMethod'), dict) else {}
+                if (method.get('type'), method.get('id')) != (card.get('type'), card.get('id')):
+                    raise UpstreamError('Lavka did not keep the chosen card on the cart')
+            cashback = cart.get('cashback') if isinstance(cart.get('cashback'), dict) else {}
+            if cashback.get('exist') is True and not cashback.get('flow'):
+                await self._post(self.SITE_WRITES[1], self._site_body(cart, cashback_flow='gain'))
+                cart = await self.retrieve()
+            return cart
+
+    def _site_body(self, cart, **fields):
+        return {'cart_id': cart['cartId'], 'cart_version': cart['cartVersion'], 'position': {'location': self.location},
+                'is_supermarket': False, **fields}
 
     async def set_items(self, quantities, add=False):
         """Set absolute quantities for several products in one update; 0 removes.

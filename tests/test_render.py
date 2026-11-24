@@ -121,7 +121,7 @@ def test_preview_hands_over_token_and_exact_total():
         'items': [{'title': 'Тво\xadрог', 'quantity': '1', 'price': '19990'}]})
     assert 'nothing is charged yet' in text and 'Card **** 3456' in text and '(flat 5)' in text
     assert '- Творог ×1 — 19 990 сум' in text
-    assert 'submit_order(order_preview_token="tok-123", confirmed_total_uzs="87630", explicit_confirmation=true)' in text
+    assert 'submit_order(confirmed_total_uzs="87630", explicit_confirmation=true)' in text and 'tok-123' not in text
 
 
 def test_preview_shows_every_delivery_term_the_order_sends():

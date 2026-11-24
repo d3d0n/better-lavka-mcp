@@ -4,6 +4,14 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-24
+
+### Changed
+- `submit_order` takes no token: it places the latest `preview_order` of the same conversation (MCP session), so the model never copies a 43-character string. Another chat's preview can't be placed, and any attempt uses the preview up. The call is now `submit_order(confirmed_total_uzs, explicit_confirmation=true)`.
+
+### Fixed
+- `preview_order` puts the chosen card on the Lavka cart (`cart/v1/set-payment`) and sets cashback to earning (`set-cashback-flow`) when neither is set, as the site's checkout page does when it opens. Seen live: a cart without a payment method was charged and then canceled by Lavka, while a cart the site had prepared went through.
+
 ## [0.9.0] — 2026-11-24
 
 ### Changed
@@ -183,7 +191,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.8.1...v0.8.2

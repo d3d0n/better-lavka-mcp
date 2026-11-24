@@ -242,7 +242,7 @@ async def test_preview_order_defaults_to_session_address_and_only_card(lavka, mo
             return type('R', (), {'masked_cards': ['**** 4242']})()
     async def preview(http, index, suffix, expected=None):
         seen['expected'] = expected
-        return {'index': index, 'suffix': suffix}
+        return {'index': index, 'suffix': suffix, 'preview_token': 't'}
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)
@@ -260,7 +260,7 @@ async def test_preview_order_remembers_the_chosen_card(lavka, monkeypatch):
         async def lookup(self):
             return type('R', (), {'masked_cards': ['**** 1111', '**** 2222']})()
     async def preview(http, index, suffix, expected=None):
-        return {'suffix': suffix}
+        return {'suffix': suffix, 'preview_token': 't'}
     monkeypatch.setattr(orders, 'addresses', addresses)
     monkeypatch.setattr(orders, 'preview', preview)
     monkeypatch.setattr('better_lavka_mcp.payment.PaymentClient', Cards)

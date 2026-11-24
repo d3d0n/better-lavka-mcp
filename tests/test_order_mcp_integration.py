@@ -38,6 +38,12 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         calls.append(path)
         if path.endswith('get-favorite-addresses'): return httpx.Response(200,json=[{'address':address}])
         if path.endswith('service-info'): return httpx.Response(200,json={'currency':'UZS','currencySign':'sum','depotId':'depot'})
+        if path.endswith('cart/v1/set-payment'):
+            # The site's checkout-page call: snake_case body, one-time idempotency header.
+            body = json.loads(request.content)
+            assert request.headers['X-Idempotency-Token'] and body['cart_version'] == cart['cartVersion']
+            cart.update(paymentMethod=body['payment_method'], cartVersion=cart['cartVersion'] + 1)
+            return httpx.Response(200, json={})
         if path.endswith('retrieve'): return httpx.Response(200,json=cart)
         if path.endswith('methods'): return httpx.Response(200,json={'methods':[{'type':'card','id':'private','number':'**** 1234','availability':{'available':True}}]})
         if path.endswith('submit'):
@@ -59,6 +65,8 @@ async def test_mock_checkout_single_submit_and_cancel(tmp_path, monkeypatch):
         assert preview['address']['flat']=='5' and preview['total_uzs']=='100'
         result=await orders.submit(http,preview['preview_token'],'100',True)
         assert result['order_id']=='o1'
+        # The preview put the card on the cart once; the check before submit wrote nothing.
+        assert calls.count('/api/v2/lavka/v1/cart/v1/set-payment') == 1 and cart['paymentMethod'] == {'type': 'card', 'id': 'private'}
         assert result['payment_status']=='wait_user_action' and result['redirect_url']=='https://trust.example/3ds'
         with pytest.raises(ValueError, match='consumed'): await orders.submit(http,preview['preview_token'],'100',True)
         async def history(): return {'orders':[{'order_id':'o1','status':'cancelled'}]}
@@ -73,7 +81,7 @@ async def test_checkout_timeout_blocks_new_preview_across_instances(tmp_path, mo
     monkeypatch.setattr(orders, 'STATE', tmp_path/'previews')
     cart = {'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]}
     binding={'cart':cart, 'position':{'location':[69.2,41.3]}, 'card':{'type':'card','id':'id'}, 'index':0,'suffix':'1234'}
-    async def snap(*args): return binding, {'pageData':{'passportInfo':{'status':'VALID'}}}
+    async def snap(*args, **kwargs): return binding, {'pageData':{'passportInfo':{'status':'VALID'}}}
     monkeypatch.setattr(orders, 'snapshot', snap)
     writes=[]
     def handle(request):
@@ -96,7 +104,7 @@ async def test_expiry_during_fresh_preflight_prevents_write(tmp_path, monkeypatc
     now=[1000.0]
     monkeypatch.setattr(orders.time,'time',lambda: now[0])
     binding={'cart':{'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]},'position':{'location':[69.2,41.3]},'card':{'type':'card','id':'id'},'index':0,'suffix':'1234'}
-    async def snap(*args):
+    async def snap(*args, **kwargs):
         now[0]+=200
         return binding, {'pageData':{'passportInfo':{'status':'VALID'}}}
     monkeypatch.setattr(orders,'snapshot',snap)
@@ -116,7 +124,7 @@ async def test_changed_data_during_preflight_releases_guard(tmp_path, monkeypatc
            'position': {'location':[69.2,41.3]}, 'card': {'type':'card','id':'id'}, 'index':0, 'suffix':'1234'}
     new = {**old, 'cart': {**old['cart'], 'cartVersion': 2}}
     bindings = [old, new]
-    async def snap(*args):
+    async def snap(*args, **kwargs):
         return bindings.pop(0), {}
     monkeypatch.setattr(orders, 'snapshot', snap)
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: pytest.fail('write attempted'))) as http:
@@ -134,7 +142,7 @@ async def test_two_valid_previews_cannot_both_submit(tmp_path, monkeypatch):
     binding = {'cart': {'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]},
                'position': {'location':[69.2,41.3]}, 'card': {'type':'card','id':'id'}, 'index':0, 'suffix':'1234'}
     calls, paused, release = [], asyncio.Event(), asyncio.Event()
-    async def snap(*args):
+    async def snap(*args, **kwargs):
         calls.append(1)
         if len(calls) <= 2:
             return binding, {}
@@ -205,7 +213,7 @@ async def test_preview_bound_to_unchanged_authenticated_session(tmp_path, monkey
     monkeypatch.setattr(orders, 'GUARD', tmp_path/'guard')
     monkeypatch.setattr(orders, 'STATE', tmp_path/'previews')
     binding={'cart':{'cartId':'c','cartVersion':1,'orderFlowVersion':'v','totalPriceValue':'10','items':[{'id':'x'}]},'position':{'location':[69.2,41.3]},'card':{'type':'card','id':'id'},'index':0,'suffix':'1234'}
-    async def snap(*args): return binding, {'pageData':{'passportInfo':{'status':'VALID'}}}
+    async def snap(*args, **kwargs): return binding, {'pageData':{'passportInfo':{'status':'VALID'}}}
     monkeypatch.setattr(orders,'snapshot',snap)
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: pytest.fail('write attempted'))) as http:
         http.cookies.set('Session_id','first',domain='.yandex.uz',path='/')
@@ -219,7 +227,7 @@ async def test_success_allows_fresh_preview(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
     binding = {"cart":{"cartId":"c","cartVersion":1,"orderFlowVersion":"v","totalPriceValue":"10","items":[{"id":"x"}]},"position":{"location":[69.2,41.3]},"card":{"type":"card","id":"id"},"index":0,"suffix":"1234"}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, "snapshot", snap)
     def handle(request):
         if request.url.path.endswith("payments/v1/status"):
@@ -245,7 +253,7 @@ async def test_fields_lavka_changes_on_every_read_do_not_block_the_order(tmp_pat
                 "nextIdempotencyToken": f"token-{n}",
                 "deliveryConditions": [{"templateVars": {"minEtaTimestamp": f"12:{n:02}", "maxEtaTimestamp": f"13:{n:02}"}}]}
     totals = iter(["10", "10", "10", "11"])
-    async def snap(*args):
+    async def snap(*args, **kwargs):
         return {"cart": cart(next(totals)), "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"},
                 "index": 0, "suffix": "1234"}, {}
     monkeypatch.setattr(orders, "snapshot", snap)
@@ -277,7 +285,7 @@ async def test_submit_request_matches_the_lavka_site(tmp_path, monkeypatch):
             "nextIdempotencyToken": "once", "cashback": {"flow": "gain", "walletId": "w/1", "availableForPayment": 17960},
             "paidServices": {"serviceFeeV2": {"amount": "3990"}, "bagsSample": {"amount": "1950"}}}
     binding = {"cart": cart, "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
-    async def snap(*args): return binding, {"authProxyCsrfToken": "a", "csrfToken": "b", "pageEnv": {"cityId": 10335, "locale": {"lang": "ru", "region": "UZ"}}}
+    async def snap(*args, **kwargs): return binding, {"authProxyCsrfToken": "a", "csrfToken": "b", "pageEnv": {"cityId": 10335, "locale": {"lang": "ru", "region": "UZ"}}}
     monkeypatch.setattr(orders, "snapshot", snap)
     sent, sent_paths = [], []
     def handle(request):
@@ -317,7 +325,7 @@ async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
                         "items": [{"id": "x", "title": "Творог", "quantity": "2"}]},
                "position": {"location": [69.2, 41.3], "city": "Ташкент", "street": "Example street", "house": "1", "leftAtDoor": True},
                "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, "snapshot", snap)
     posts, questions = [], []
     def handle(request):
@@ -330,14 +338,15 @@ async def _submit_through_mcp(tmp_path, monkeypatch, answer, *, ask=True):
         session.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
         return session
     monkeypatch.setattr(client, "create_http", http)
-    async with http() as session:
-        token = (await orders.preview(session, 0, "1234"))["preview_token"]
     async def dialog(context, params):
         questions.append(params.message)
         return answer
     async with create_connected_server_and_client_session(app.mcp, elicitation_callback=dialog if ask else None) as mcp_client:
-        result = await mcp_client.call_tool("submit_order", {"order_preview_token": token, "confirmed_total_uzs": "87630",
-                                                             "explicit_confirmation": True})
+        preview = await mcp_client.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "1234"})
+        # The model only ever sees the total; the preview itself stays with this conversation's session.
+        assert 'submit_order(confirmed_total_uzs="87630", explicit_confirmation=true)' in preview.content[0].text
+        assert "token" not in preview.content[0].text.lower()
+        result = await mcp_client.call_tool("submit_order", {"confirmed_total_uzs": "87630", "explicit_confirmation": True})
     return result.content[0].text, posts, questions
 
 
@@ -372,7 +381,7 @@ async def test_rejection_exposes_safe_codes_and_releases(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
     binding = {"cart":{"cartId":"c","cartVersion":1,"orderFlowVersion":"v","totalPriceValue":"10","items":[{"id":"x"}]},"position":{"location":[69.2,41.3]},"card":{"type":"card","id":"id"},"index":0,"suffix":"1234"}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, "snapshot", snap)
     body = {"code":"grocery_unavailable_for_checkout", "detail":"bad_service_fee_v2", "secret":"private"}
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(400,json=body))) as http:
@@ -421,7 +430,7 @@ async def test_unclassified_http_failure_stays_unknown(tmp_path, monkeypatch):
     monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
     monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
     binding = {"cart":{"cartId":"c","cartVersion":1,"orderFlowVersion":"v","totalPriceValue":"10","items":[{"id":"x"}]},"position":{"location":[69.2,41.3]},"card":{"type":"card","id":"id"},"index":0,"suffix":"1234"}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, "snapshot", snap)
     calls=[]
     def handler(req):
@@ -435,3 +444,36 @@ async def test_unclassified_http_failure_stays_unknown(tmp_path, monkeypatch):
         assert "private error" not in str(result)
         with pytest.raises(ValueError, match="quarantined"): await orders.preview(http,0,"1234")
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_submit_places_only_this_conversations_preview(tmp_path, monkeypatch):
+    """Two chats are two MCP sessions: one chat's preview can never be placed from another."""
+    from mcp.shared.memory import create_connected_server_and_client_session
+    monkeypatch.setattr(orders, "GUARD", tmp_path / "guard")
+    monkeypatch.setattr(orders, "STATE", tmp_path / "previews")
+    binding = {"cart": {"cartId": "c", "cartVersion": 1, "orderFlowVersion": "v", "totalPriceValue": "10", "items": [{"id": "x"}]},
+               "position": {"location": [69.2, 41.3]}, "card": {"type": "card", "id": "id"}, "index": 0, "suffix": "1234"}
+    async def snap(*args, **kwargs): return binding, {}
+    monkeypatch.setattr(orders, "snapshot", snap)
+    posts = []
+    def handle(request):
+        if request.url.path.endswith("payments/v1/status"):
+            return httpx.Response(200, json={"status": "success"})
+        posts.append(request.url.path)
+        return httpx.Response(200, json={"orderId": "one"})
+    def http():
+        session = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        session.cookies.set("Session_id", "test", domain=".yandex.uz", path="/")
+        return session
+    monkeypatch.setattr(client, "create_http", http)
+    args = {"confirmed_total_uzs": "10", "explicit_confirmation": True}
+    async with create_connected_server_and_client_session(app.mcp) as chat_a:
+        await chat_a.call_tool("preview_order", {"saved_address_index": 0, "card_last4": "1234"})
+        async with create_connected_server_and_client_session(app.mcp) as chat_b:
+            other = await chat_b.call_tool("submit_order", args)
+            assert other.isError and "No order preview in this conversation" in other.content[0].text and posts == []
+        placed = await chat_a.call_tool("submit_order", args)
+        assert "Order placed" in placed.content[0].text and len(posts) == 1
+        again = await chat_a.call_tool("submit_order", args)  # the preview is used up
+        assert again.isError and len(posts) == 1

@@ -11,7 +11,7 @@ async def test_unknown_structured_error_exposes_sanitized_diagnostics(tmp_path, 
     monkeypatch.setattr(orders, 'GUARD', tmp_path / 'guard')
     monkeypatch.setattr(orders, 'STATE', tmp_path / 'previews')
     binding = {'cart': {'cartId': 'c', 'cartVersion': 1, 'orderFlowVersion': 'v', 'totalPriceValue': '10', 'items': [{'id': 'x'}]}, 'position': {'location': [69.2, 41.3]}, 'card': {'type': 'card', 'id': 'id'}, 'index': 0, 'suffix': '1234'}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, 'snapshot', snap)
     calls = []
     def handler(req):

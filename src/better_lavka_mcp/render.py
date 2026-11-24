@@ -287,8 +287,8 @@ def _preview(r):
     for item in r['items']:
         lines.append(f"- {text(item.get('title'))} ×{item.get('quantity')} — {money(item.get('price'))}")
     lines.append(f"Total **{money(r['total_uzs'])}**.")
-    lines.append(f"Show this to the user. Only after they say yes, call submit_order(order_preview_token=\"{r['preview_token']}\", "
-                 f"confirmed_total_uzs=\"{r['total_uzs']}\", explicit_confirmation=true) within 5 minutes.")
+    lines.append(f"Show this to the user. Only after they say yes, call submit_order(confirmed_total_uzs=\"{r['total_uzs']}\", "
+                 'explicit_confirmation=true) within 5 minutes; it places exactly this preview.')
     return '\n'.join(lines)
 
 

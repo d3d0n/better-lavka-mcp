@@ -9,7 +9,7 @@ async def test_fee_rejection_gives_safe_fresh_confirmation_guidance(tmp_path, mo
     monkeypatch.setattr(orders, 'GUARD', tmp_path / 'guard')
     monkeypatch.setattr(orders, 'STATE', tmp_path / 'previews')
     binding = {'cart': {'cartId': 'c', 'cartVersion': 1, 'orderFlowVersion': 'v', 'totalPriceValue': '100', 'items': [{'id': 'x'}]}, 'position': {'location': [69.2, 41.3]}, 'card': {'type': 'card', 'id': 'id'}, 'index': 0, 'suffix': '1234'}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, 'snapshot', snap)
     calls = []
     def handler(req):
@@ -46,7 +46,7 @@ async def test_guidance_only_for_recognized_rejections(tmp_path, monkeypatch, st
     monkeypatch.setattr(orders, 'GUARD', tmp_path / 'guard')
     monkeypatch.setattr(orders, 'STATE', tmp_path / 'previews')
     binding = {'cart': {'cartId': 'c', 'cartVersion': 1, 'orderFlowVersion': 'v', 'totalPriceValue': '10', 'items': [{'id': 'x'}]}, 'position': {'location': [69.2, 41.3]}, 'card': {'type': 'card', 'id': 'id'}, 'index': 0, 'suffix': '1234'}
-    async def snap(*args): return binding, {}
+    async def snap(*args, **kwargs): return binding, {}
     monkeypatch.setattr(orders, 'snapshot', snap)
     calls = []
     def handler(req):
