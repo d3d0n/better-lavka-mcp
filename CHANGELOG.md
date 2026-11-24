@@ -4,6 +4,11 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-24
+
+### Fixed
+- Server instructions: the sign-in hint reads "if not signed in" again after the overview sentence.
+
 ## [0.7.0] — 2026-11-24
 
 ### Added
@@ -130,7 +135,8 @@ First release on PyPI and in the MCP Registry.
 - Tools renamed to plain verb + noun names; `set_cart_quantity` no longer needs a price.
 - Package renamed to `better-lavka-mcp` and moved to `src/`.
 
-[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/d3d0n/better-lavka-mcp/compare/v0.6.2...v0.6.3
