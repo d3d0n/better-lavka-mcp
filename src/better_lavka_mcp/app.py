@@ -55,7 +55,7 @@ def tool():
             result = await fn(*args, **kwargs)
             return result if json_output() else render(fn.__name__, result)
         # FastMCP builds the tool schema from this signature; the wrapper returns text.
-        as_text.__signature__ = inspect.signature(fn).replace(return_annotation=str)  # pyright: ignore[reportAttributeAccessIssue]
+        as_text.__signature__ = inspect.signature(fn).replace(return_annotation=str)  # ty: ignore[missing-attribute]
         mcp.tool(structured_output=False)(as_text)
         return fn
     return register

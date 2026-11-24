@@ -14,8 +14,8 @@ description = "Run the offline test suite using uv-managed Python"
 run = "uv run --locked --extra test python -m pytest -q"
 
 [tasks.lint]
-description = "Lint (ruff) and type-check (pyright) against the project's virtualenv"
+description = "Lint (ruff) and type-check (ty) against the project's virtualenv"
 run = [
   "uvx ruff@0.17.6 check src tests",
-  "uvx pyright@1.1.414 --pythonpath .venv/bin/python src",
+  "uvx ty@0.0.109 check src",
 ]

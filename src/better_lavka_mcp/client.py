@@ -276,12 +276,12 @@ class _SessionClient(httpx.AsyncClient):
 
     _loaded_from: tuple[bytes, dict] | None = None
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type=None, exc_value=None, traceback=None):
         try:
             self._save_rotated_cookies()
         except Exception:
             pass  # Saving is best effort; the call's own result matters more.
-        return await super().__aexit__(*exc)
+        return await super().__aexit__(exc_type, exc_value, traceback)
 
     def _save_rotated_cookies(self):
         if self._loaded_from is None:

@@ -20,7 +20,7 @@ def write_qr_image(link, target):
     fd, temporary = tempfile.mkstemp(prefix='.lavka-qr-', dir=target.parent)
     try:
         with os.fdopen(fd, 'wb') as stream:
-            qrcode.make(link).save(stream, format='PNG')  # pyright: ignore[reportCallIssue]  # PIL image accepts format
+            qrcode.make(link).save(stream, format='PNG')
         os.replace(temporary, target)
     finally:
         if os.path.exists(temporary):

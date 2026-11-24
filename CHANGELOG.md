@@ -4,6 +4,13 @@ All notable changes. Versions follow [Semantic Versioning](https://semver.org); 
 
 ## [Unreleased]
 
+### Fixed
+- `add_to_cart` and `repeat_order` keep the cart lock across adding and capping at the store limit, so a removal made meanwhile isn't undone.
+- Order previews and cancellation work on Windows: the owner-only file checks apply POSIX permissions only on macOS and Linux.
+
+### Changed
+- Type checking uses ty instead of pyright; CI also runs a Windows job.
+
 ## [0.6.0] — 2026-11-24
 
 ### Added

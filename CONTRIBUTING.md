@@ -11,7 +11,7 @@ mise trust
 mise install
 mise run install
 mise run test
-mise run lint   # ruff + pyright
+mise run lint   # ruff + ty
 ```
 
 Mise manages uv and runs the project tasks; uv installs the configured managed Python and locked dependencies.

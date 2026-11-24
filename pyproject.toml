@@ -48,6 +48,5 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E4", "E9", "F", "I", "B"]
 
-[tool.pyright]
-include = ["src"]
-pythonVersion = "3.12"
+[tool.ty.environment]
+python-version = "3.12"
