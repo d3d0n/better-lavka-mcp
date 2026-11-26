@@ -9,6 +9,7 @@
 !/CHANGELOG.md
 !/mise.toml
 !/server.json
+!/glama.json
 !/uv.lock
 !/docs/
 /docs/*
